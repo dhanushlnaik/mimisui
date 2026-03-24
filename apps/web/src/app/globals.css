@@ -1,15 +1,16 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
 
-:root {
-  --background: 35 45% 96%;
-  --foreground: 28 30% 12%;
-  --muted: 34 20% 90%;
-  --muted-foreground: 24 12% 36%;
-  --card: 42 26% 98%;
-  --border: 28 20% 80%;
-  --primary: 14 88% 46%;
+@theme {
+  --color-background: hsl(35 45% 96%);
+  --color-foreground: hsl(28 30% 12%);
+  --color-muted: hsl(34 20% 90%);
+  --color-muted-foreground: hsl(24 12% 36%);
+  --color-card: hsl(42 26% 98%);
+  --color-border: hsl(28 20% 80%);
+  --color-primary: hsl(14 88% 46%);
+
+  --font-body: "Space Grotesk", sans-serif;
+  --font-title: "Libre Baskerville", serif;
 }
 
 body {
@@ -29,7 +30,7 @@ body {
 }
 
 .persona-title {
-  @apply dec-title;
+  @apply font-title;
   background-image: linear-gradient(110deg, hsl(14 88% 38%), hsl(200 70% 35%));
   -webkit-background-clip: text;
   background-clip: text;

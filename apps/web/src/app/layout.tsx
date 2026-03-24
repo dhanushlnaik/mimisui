@@ -1,18 +1,10 @@
 import type { Metadata } from "next";
-import { Libre_Baskerville, Space_Grotesk } from "next/font/google";
 import type { ReactNode } from "react";
+import "@fontsource/libre-baskerville/400.css";
+import "@fontsource/libre-baskerville/700.css";
+import "@fontsource/space-grotesk/400.css";
+import "@fontsource/space-grotesk/700.css";
 import "./globals.css";
-
-const bodyFont = Space_Grotesk({
-  subsets: ["latin"],
-  variable: "--font-space-grotesk"
-});
-
-const titleFont = Libre_Baskerville({
-  subsets: ["latin"],
-  variable: "--font-libre-baskerville",
-  weight: ["400", "700"]
-});
 
 export const metadata: Metadata = {
   title: "CoCo-sui Dashboard",
@@ -22,7 +14,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
-      <body className={`${bodyFont.variable} ${titleFont.variable}`}>{children}</body>
+      <body className="font-body">{children}</body>
     </html>
   );
 }

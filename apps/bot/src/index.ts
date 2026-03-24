@@ -13,7 +13,7 @@ const client = new Client({
   partials: [Partials.Channel]
 });
 
-client.once("ready", () => {
+client.once("clientReady", () => {
   logger.info(`Bot online as ${client.user?.tag ?? "unknown"}`);
 });
 

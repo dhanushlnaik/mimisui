@@ -5,28 +5,31 @@
   "type": "module",
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "next build --webpack",
     "start": "next start",
     "check": "tsc --noEmit"
   },
   "dependencies": {
+    "@fontsource/libre-baskerville": "^5.2.9",
+    "@fontsource/space-grotesk": "^5.2.8",
     "@cocosui/config": "workspace:*",
     "@cocosui/db": "workspace:*",
-    "@t3-oss/env-nextjs": "^0.12.0",
-    "better-auth": "^1.1.16",
-    "framer-motion": "^11.11.17",
-    "next": "15.1.0",
-    "react": "19.0.0",
-    "react-dom": "19.0.0",
-    "zod": "^3.23.8"
+    "@t3-oss/env-nextjs": "^0.13.11",
+    "better-auth": "^1.5.6",
+    "framer-motion": "^12.38.0",
+    "next": "16.2.1",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@types/node": "^22.7.4",
-    "@types/react": "^19.0.0",
-    "@types/react-dom": "^19.0.0",
-    "autoprefixer": "^10.4.20",
-    "postcss": "^8.4.47",
-    "tailwindcss": "^3.4.13",
-    "typescript": "^5.6.2"
+    "@tailwindcss/postcss": "^4.1.16",
+    "@types/node": "^25.5.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "autoprefixer": "^10.4.27",
+    "postcss": "^8.5.8",
+    "tailwindcss": "^4.2.2",
+    "typescript": "^6.0.2"
   }
 }
