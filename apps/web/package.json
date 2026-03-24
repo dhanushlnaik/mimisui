@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "next dev",
+    "prebuild": "pnpm --filter @cocosui/db generate",
     "build": "next build --webpack",
     "start": "next start",
     "check": "tsc --noEmit"
