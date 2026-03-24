@@ -5,6 +5,7 @@
     "allowJs": false,
     "incremental": true,
     "jsx": "preserve",
+    "ignoreDeprecations": "6.0",
     "baseUrl": ".",
     "plugins": [{ "name": "next" }],
     "paths": {
