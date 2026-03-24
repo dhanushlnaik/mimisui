@@ -1,6 +1,6 @@
 import { SlashCommandBuilder } from "discord.js";
-import type { SlashCommand } from "../types/command";
-import { getGuildPrefix, setGuildPrefix } from "../lib/guild-config";
+import type { SlashCommand } from "../types/command.js";
+import { getGuildPrefix, setGuildPrefix } from "../lib/guild-config.js";
 
 export const prefixCommand: SlashCommand = {
   data: new SlashCommandBuilder()

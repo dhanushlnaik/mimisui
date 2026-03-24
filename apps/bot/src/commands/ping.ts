@@ -1,5 +1,5 @@
 import { SlashCommandBuilder } from "discord.js";
-import type { SlashCommand } from "../types/command";
+import type { SlashCommand } from "../types/command.js";
 
 export const pingCommand: SlashCommand = {
   data: new SlashCommandBuilder().setName("ping").setDescription("Check bot latency."),

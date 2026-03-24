@@ -75,8 +75,17 @@ model DiscordUser {
   avatar         String?
   relationshipsA Relationship[] @relation("UserOne")
   relationshipsB Relationship[] @relation("UserTwo")
+  socialLinksA   SocialRelationship[] @relation("SocialUserA")
+  socialLinksB   SocialRelationship[] @relation("SocialUserB")
+  socialEvents   SocialRelationshipEvent[]
+  socialProposalsSent SocialProposal[] @relation("ProposalSender")
+  socialProposalsReceived SocialProposal[] @relation("ProposalTarget")
   afk            AFK?
   todos          Todo[]
+  progress       UserProgress?
+  boosters       Booster[]
+  quests         UserQuest[]
+  transactions   Transaction[]
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
 }
@@ -129,4 +138,174 @@ model Todo {
   user DiscordUser @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([guildId])
+}
+
+model UserProgress {
+  userId           String   @id
+  guildId          String?
+  xp               Int      @default(0)
+  level            Int      @default(1)
+  coins            Int      @default(0)
+  title            String   @default("Beginner")
+  dailyStreak      Int      @default(0)
+  lastXpAt         DateTime?
+  xpMinuteBucket   DateTime?
+  xpMinuteGained   Int      @default(0)
+  firstCommandDate String?
+  lastDailyClaimDate String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  user DiscordUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([guildId])
+}
+
+model Booster {
+  id         String   @id @default(cuid())
+  userId     String
+  guildId    String?
+  type       String
+  multiplier Float
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+
+  user DiscordUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model UserQuest {
+  id          String   @id @default(cuid())
+  userId      String
+  guildId     String?
+  type        String
+  action      String
+  target      Int
+  progress    Int      @default(0)
+  rewardXP    Int
+  rewardCoins Int
+  completed   Boolean  @default(false)
+  claimed     Boolean  @default(false)
+  periodKey   String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user DiscordUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, guildId, type, action, periodKey])
+  @@index([type, periodKey])
+}
+
+model Transaction {
+  id        String   @id @default(cuid())
+  userId    String
+  guildId   String?
+  amount    Int
+  reason    String
+  createdAt DateTime @default(now())
+
+  user DiscordUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+model SocialRelationship {
+  id            String             @id @default(cuid())
+  type          RelationshipType
+  status        RelationshipStatus @default(ACTIVE)
+  userAId       String
+  userBId       String
+  userLowId     String
+  userHighId    String
+  guildOriginId String?
+  startedAt     DateTime           @default(now())
+  endedAt       DateTime?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  progress SocialRelationshipProgress?
+  events SocialRelationshipEvent[]
+
+  leftUser  DiscordUser @relation("SocialUserA", fields: [userAId], references: [id], onDelete: Cascade)
+  rightUser DiscordUser @relation("SocialUserB", fields: [userBId], references: [id], onDelete: Cascade)
+
+  @@unique([type, userLowId, userHighId])
+  @@index([type, status])
+  @@index([userAId, status])
+  @@index([userBId, status])
+}
+
+model SocialRelationshipProgress {
+  relationshipId       String   @id
+  bondXp               Int      @default(0)
+  bondLevel            Int      @default(1)
+  bondScore            Int      @default(0)
+  totalDates           Int      @default(0)
+  currentStreak        Int      @default(0)
+  bestStreak           Int      @default(0)
+  sharedCoins          Int      @default(0)
+  questsCompleted      Int      @default(0)
+  anniversaryClaimedAt DateTime?
+  lastDateAt           DateTime?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  relationship SocialRelationship @relation(fields: [relationshipId], references: [id], onDelete: Cascade)
+}
+
+model SocialRelationshipEvent {
+  id             String                @id @default(cuid())
+  relationshipId String
+  eventType      RelationshipEventType
+  actorUserId    String
+  metadata       Json?
+  createdAt      DateTime              @default(now())
+
+  relationship SocialRelationship @relation(fields: [relationshipId], references: [id], onDelete: Cascade)
+  actor        DiscordUser        @relation(fields: [actorUserId], references: [id], onDelete: Cascade)
+
+  @@index([relationshipId, createdAt])
+}
+
+model SocialProposal {
+  id          String             @id @default(cuid())
+  type        RelationshipType
+  fromUserId  String
+  toUserId    String
+  guildId     String?
+  status      RelationshipStatus @default(PENDING)
+  expiresAt   DateTime
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  fromUser DiscordUser @relation("ProposalSender", fields: [fromUserId], references: [id], onDelete: Cascade)
+  toUser   DiscordUser @relation("ProposalTarget", fields: [toUserId], references: [id], onDelete: Cascade)
+
+  @@index([toUserId, status])
+  @@index([fromUserId, status])
+  @@index([expiresAt])
+}
+
+enum RelationshipType {
+  PARTNER
+  SIBLING
+}
+
+enum RelationshipStatus {
+  PENDING
+  ACTIVE
+  ENDED
+}
+
+enum RelationshipEventType {
+  PROPOSED
+  ACCEPTED
+  REJECTED
+  DIVORCED
+  DATE_COMPLETED
+  STREAK_UPDATED
+  QUEST_COMPLETED
+  ANNIVERSARY_CLAIMED
 }

@@ -1,5 +1,5 @@
 import { DEFAULT_GUILD_SETTINGS, DEFAULT_PREFIX } from "@cocosui/config";
-import { Prisma, db } from "@cocosui/db";
+import { db } from "@cocosui/db";
 
 export async function ensureGuild(guildId: string, name?: string | null) {
   try {
@@ -15,10 +15,12 @@ export async function ensureGuild(guildId: string, name?: string | null) {
         settings: DEFAULT_GUILD_SETTINGS
       }
     });
-  } catch (error) {
+  } catch (error: unknown) {
     if (
-      error instanceof Prisma.PrismaClientKnownRequestError &&
-      error.code === "P2002"
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      (error as { code?: string }).code === "P2002"
     ) {
       // Concurrent upserts can race; fallback to update/read.
       return db.guild.update({

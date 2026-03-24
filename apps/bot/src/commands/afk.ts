@@ -1,6 +1,6 @@
 import { db } from "@cocosui/db";
-import { SlashCommandBuilder } from "discord.js";
-import type { SlashCommand } from "../types/command";
+import { EmbedBuilder, SlashCommandBuilder } from "discord.js";
+import type { SlashCommand } from "../types/command.js";
 
 export const afkCommand: SlashCommand = {
   data: new SlashCommandBuilder()
@@ -43,7 +43,12 @@ export const afkCommand: SlashCommand = {
     });
 
     await interaction.reply({
-      content: `You're AFK now: ${reason}`,
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0xf4b942)
+          .setTitle("AFK Enabled")
+          .setDescription(`You're now AFK.\n**Reason:** ${reason}`)
+      ],
       ephemeral: true
     });
   }

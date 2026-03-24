@@ -1,10 +1,14 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { PrismaPg } from "@prisma/adapter-pg";
-import { PrismaClient } from "@prisma/client";
+import prismaPkg from "@prisma/client";
+
+const { PrismaClient } = prismaPkg as unknown as {
+  PrismaClient: new (args?: unknown) => any;
+};
 
 const globalForPrisma = globalThis as unknown as {
-  prisma?: PrismaClient;
+  prisma?: any;
 };
 
 function readDatabaseUrlFromEnvFile(filePath: string) {
@@ -63,4 +67,4 @@ if (process.env.NODE_ENV !== "production") {
   globalForPrisma.prisma = db;
 }
 
-export * from "@prisma/client";
+export const Prisma = (prismaPkg as any).Prisma;
