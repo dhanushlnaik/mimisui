@@ -1,0 +1,17 @@
+FROM node:20-alpine
+
+ENV PNPM_HOME="/pnpm"
+ENV PATH="$PNPM_HOME:$PATH"
+ENV NODE_ENV=production
+
+RUN corepack enable
+
+WORKDIR /app
+
+COPY . .
+
+RUN pnpm install --frozen-lockfile
+RUN pnpm --filter @cocosui/db generate
+RUN pnpm --filter @cocosui/bot build
+
+CMD ["pnpm", "--filter", "@cocosui/bot", "start"]

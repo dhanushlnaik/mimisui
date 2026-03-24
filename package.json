@@ -1,0 +1,21 @@
+{
+  "name": "coco-sui",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@9.12.2",
+  "scripts": {
+    "build": "turbo build",
+    "dev": "turbo dev",
+    "dev:bot": "pnpm --filter @cocosui/bot dev",
+    "dev:web": "pnpm --filter @cocosui/web dev",
+    "lint": "turbo lint",
+    "check": "turbo check",
+    "db:generate": "pnpm --filter @cocosui/db generate",
+    "db:migrate": "pnpm --filter @cocosui/db migrate",
+    "db:studio": "pnpm --filter @cocosui/db studio"
+  },
+  "devDependencies": {
+    "turbo": "^2.1.1",
+    "typescript": "^5.6.2"
+  }
+}

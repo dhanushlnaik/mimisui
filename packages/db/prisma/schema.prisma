@@ -1,0 +1,134 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id
+  name          String
+  email         String
+  emailVerified Boolean   @default(false)
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  sessions      Session[]
+  accounts      Account[]
+
+  @@unique([email])
+  @@map("user")
+}
+
+model Session {
+  id        String   @id
+  expiresAt DateTime
+  token     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([token])
+  @@index([userId])
+  @@map("session")
+}
+
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([userId])
+  @@map("account")
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+  @@map("verification")
+}
+
+model DiscordUser {
+  id             String         @id
+  username       String
+  avatar         String?
+  relationshipsA Relationship[] @relation("UserOne")
+  relationshipsB Relationship[] @relation("UserTwo")
+  afk            AFK?
+  todos          Todo[]
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+}
+
+model Guild {
+  id        String   @id
+  name      String?
+  prefix    String   @default("!")
+  settings  Json     @default("{}")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model AFK {
+  userId      String   @id
+  guildId     String
+  reason      String
+  mentionCount Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user DiscordUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([guildId])
+}
+
+model Relationship {
+  id        String   @id @default(cuid())
+  guildId   String
+  user1Id   String
+  user2Id   String
+  type      String
+  score     Int      @default(0)
+  createdAt DateTime @default(now())
+
+  user1 DiscordUser @relation("UserOne", fields: [user1Id], references: [id], onDelete: Cascade)
+  user2 DiscordUser @relation("UserTwo", fields: [user2Id], references: [id], onDelete: Cascade)
+
+  @@unique([guildId, user1Id, user2Id, type])
+  @@index([guildId])
+}
+
+model Todo {
+  id        String   @id @default(cuid())
+  userId    String
+  guildId   String?
+  content   String
+  createdAt DateTime @default(now())
+
+  user DiscordUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([guildId])
+}

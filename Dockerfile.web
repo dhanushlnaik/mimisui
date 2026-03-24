@@ -1,0 +1,19 @@
+FROM node:20-alpine
+
+ENV PNPM_HOME="/pnpm"
+ENV PATH="$PNPM_HOME:$PATH"
+ENV NODE_ENV=production
+ENV PORT=3000
+
+RUN corepack enable
+
+WORKDIR /app
+
+COPY . .
+
+RUN pnpm install --frozen-lockfile
+RUN pnpm --filter @cocosui/db generate
+RUN pnpm --filter @cocosui/web build
+
+EXPOSE 3000
+CMD ["pnpm", "--filter", "@cocosui/web", "start"]
