@@ -5,9 +5,11 @@ loadEnv({ path: "../../.env" });
 loadEnv({ path: "../../apps/web/.env" });
 loadEnv({ path: "../../apps/bot/.env" });
 
-if (!process.env.DATABASE_URL) {
+const prismaDatasourceUrl = process.env.DIRECT_DATABASE_URL ?? process.env.DATABASE_URL;
+
+if (!prismaDatasourceUrl) {
   throw new Error(
-    "DATABASE_URL is not set. Add it in apps/web/.env or apps/bot/.env, or export it in your shell."
+    "Set DIRECT_DATABASE_URL (preferred for Prisma) or DATABASE_URL in apps/web/.env or apps/bot/.env."
   );
 }
 
@@ -17,6 +19,6 @@ export default defineConfig({
     path: "prisma/migrations"
   },
   datasource: {
-    url: process.env.DATABASE_URL
+    url: prismaDatasourceUrl
   }
 });

@@ -28,6 +28,11 @@ pnpm --filter @cocosui/db exec prisma db push
 pnpm --filter @cocosui/db generate
 ```
 
+Connection string split (recommended):
+
+- `DATABASE_URL` = pooled Neon URL (`-pooler` host) for app runtime.
+- `DIRECT_DATABASE_URL` = direct Neon URL (non-`-pooler`) for Prisma schema commands.
+
 ## 4) Build
 
 ```bash

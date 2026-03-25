@@ -24,11 +24,17 @@ Configure env files for bot and web:
 
 Typical required keys:
 
-- `DATABASE_URL`
+- `DATABASE_URL` (runtime: use pooled Neon URL)
+- `DIRECT_DATABASE_URL` (Prisma CLI/migrations: use direct non-pooler Neon URL)
 - `DISCORD_TOKEN`
 - `DISCORD_CLIENT_ID`
 - `DISCORD_GUILD_ID` (optional if global register flow)
 - auth keys for web (Better Auth / Discord OAuth)
+
+Neon recommendation:
+
+- `DATABASE_URL` -> `...-pooler...` host for bot/web runtime traffic.
+- `DIRECT_DATABASE_URL` -> direct host (non-`-pooler`) for `prisma db push` / `prisma migrate`.
 
 ## 3) Database sync
 
