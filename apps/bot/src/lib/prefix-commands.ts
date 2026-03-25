@@ -1309,27 +1309,33 @@ async function runFamily({ message, args }: PrefixContext) {
         embeds: [
           new EmbedBuilder()
             .setColor(0xf72585)
-            .setDescription(`No active relationship with ${target}.`)
+            .setDescription(`You have no active relationship with ${target}.`)
             .setFooter({ text: "Team Tatsui ❤️" })
         ]
       });
       return;
     }
+    const relationLabel = status.type === "PARTNER" ? "Partner" : "Sibling";
     await message.reply({
       embeds: [
         new EmbedBuilder()
           .setColor(0xf72585)
-          .setTitle("💞 Bond Status")
+          .setAuthor({
+            name: `${message.author.username}'s Bond with ${target.username}`,
+            iconURL: getAvatarUrl(message.author)
+          })
+          .setThumbnail("https://i.gifer.com/ZdPB.gif")
           .setDescription(
             [
-              `Type: ${status.type}`,
+              `Type: \`${relationLabel}\``,
               `Started: <t:${Math.floor(new Date(status.startedAt).getTime() / 1000)}:D>`,
-              `Bond Level: ${status.bondLevel}`,
-              `Bond XP: ${status.bondXp}`,
-              `Bond Score: ${status.bondScore}`,
-              `Streak: ${status.streak}`
+              `And Your UwU score is \`${status.bondScore}\`! Pretty Good :smirk:`,
+              `Bond Level: \`${status.bondLevel}\` • Bond XP: \`${status.bondXp}\``,
+              `Current Streak: \`${status.streak}\` • Dates: \`${status.totalDates}\``
             ].join("\n")
           )
+          .setImage("https://i.gifer.com/ZdPB.gif")
+          .setTimestamp(new Date())
           .setFooter({ text: "Team Tatsui ❤️" })
       ]
     });

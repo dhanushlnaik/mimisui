@@ -226,17 +226,19 @@ export function buildCoupleLeaderboardEmbed(
 ) {
   return new EmbedBuilder()
     .setColor(FAMILY_COLOR)
-    .setTitle("💍 Marriage Leaderboard")
+    .setAuthor({ name: "Marriage Leaderboard", iconURL: COUPLE_IMAGE })
     .setDescription(
       rows.length > 0
         ? rows
             .map(
               (r, i) =>
-                `\`${i + 1}.\` <@${r.userAId}> ♡ <@${r.userBId}> • Score \`${r.bondScore}\` • Dates \`${r.totalDates}\` • Streak \`${r.streak}\``
+                `\`${i + 1}.\` <@${r.userAId}> ♡ <@${r.userBId}>\n> UwU Score: \`${r.bondScore}\` • Dates: \`${r.totalDates}\` • Streak: \`${r.streak}\``
             )
             .join("\n")
         : "No active couples yet."
     )
+    .setThumbnail(COUPLE_IMAGE)
+    .setImage(COUPLE_IMAGE)
     .setFooter(familyFooter());
 }
 
@@ -245,13 +247,13 @@ export function buildFamilyLeaderboardEmbed(
 ) {
   return new EmbedBuilder()
     .setColor(FAMILY_COLOR)
-    .setTitle("👪 Family Leaderboard")
+    .setAuthor({ name: "Family Leaderboard" })
     .setDescription(
       rows.length > 0
         ? rows
             .map(
               (r, i) =>
-                `\`${i + 1}.\` <@${r.userId}> • Score \`${r.totalBondScore}\` • Siblings \`${r.siblingCount}\` • ${r.hasPartner ? "💍 Married" : "💤 Single"}`
+                `\`${i + 1}.\` <@${r.userId}> • UwU Score \`${r.totalBondScore}\` • Siblings \`${r.siblingCount}\` • ${r.hasPartner ? "💍 Married" : "💤 Single"}`
             )
             .join("\n")
         : "No family data yet."
