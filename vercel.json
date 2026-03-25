@@ -1,0 +1,6 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "installCommand": "pnpm install --filter @cocosui/web... --filter @cocosui/db...",
+  "buildCommand": "pnpm --filter @cocosui/web build"
+}
