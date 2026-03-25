@@ -15,9 +15,20 @@ import {
   type HelpCategory
 } from "./command-catalog.js";
 import { buildHelpMessage } from "./help-view.js";
+import { getCurrentFamilyEvent } from "./family-events.js";
 import {
   awardDateInteraction,
+  awardFamilySimulationInteraction,
+  buildFamilySimulationLadderEmbed,
+  buildFamilySimulationMilestonesEmbed,
+  buildFamilySimulationPanelComponents,
+  buildFamilySimulationRecentEmbed,
+  buildFamilySimulationResultEmbed,
+  buildFamilySimulationStatsEmbed,
+  buildFamilyAchievementClaimComponents,
   buildProposalMessage,
+  claimAnniversaryReward,
+  claimFamilyAchievementRewards,
   createProposal,
   endPartnerRelationship,
   ensureFamilyEnabledOrThrow,
@@ -27,6 +38,11 @@ import {
   getCoupleLeaderboard,
   getFamilyProfile,
   getFamilyQuestBoard,
+  getFamilyAchievements,
+  getFamilySimulationAnalytics,
+  getFamilySimulationLadder,
+  getFamilySimulationMilestoneBoard,
+  getRelationshipIdentity,
   getFamilySettings,
   buildFamilyQuestClaimComponents,
   scheduleProposalTimeout,
@@ -117,7 +133,14 @@ const BASE_PREFIX_COMMANDS = [
   "divorce",
   "partner",
   "date",
+  "familysim",
+  "familysimstats",
+  "familysimmilestones",
+  "familysimladder",
+  "familysimpanel",
   "anniversary",
+  "anniversaryclaim",
+  "familyevent",
   "familyprofile",
   "siblings",
   "siblingadd",
@@ -126,6 +149,8 @@ const BASE_PREFIX_COMMANDS = [
   "familyleaderboard",
   "bondstatus",
   "familyquests",
+  "familyachievements",
+  "familyachieveclaim",
   "relationshipshop",
   "relationshipinventory",
   "relationshipbuy",
@@ -1036,14 +1061,22 @@ async function runFamily({ message, args }: PrefixContext) {
               "`family marry @user`",
               "`family divorce`",
               "`family date`",
+              "`family familysim`",
+              "`family familysimstats`",
+              "`family familysimmilestones`",
+              "`family familysimladder`",
+              "`family familysimpanel`",
               "`family profile [@user]`",
+              "`family anniversaryclaim`",
               "`family siblings`",
               "`family siblingadd @user`",
               "`family siblingremove @user`",
               "`family coupleleaderboard`",
               "`family leaderboard`",
               "`family bondstatus @user`",
-              "`family familyquests`"
+              "`family familyquests`",
+              "`family familyachievements`",
+              "`family familyachieveclaim [key]`"
             ].join("\n")
           )
           .setFooter({ text: "Team Tatsui ❤️" })
@@ -1174,14 +1207,71 @@ async function runFamily({ message, args }: PrefixContext) {
               `💞 | You've dated ${totalDates} times!`,
               `And Your UwU score is \`${uwuScore}\`! Pretty Good :smirk:`,
               "",
+              `\`Tier:\` **${result.scenarioTier}**`,
+              `\`Event:\` **${result.event.name}**`,
               `*${result.scenario}*`,
-              result.rareBonus > 0 ? `✨ Rare bonus: +${result.rareBonus}` : null
+              result.rareBonus > 0 ? `✨ Rare bonus: +${result.rareBonus}` : null,
+              `🎉 ${result.event.bonusText} (ends <t:${Math.floor(new Date(result.event.endsAt).getTime() / 1000)}:R>)`
             ]
               .filter(Boolean)
               .join("\n")
           )
           .setFooter({ text: "Team Tatsui ❤️" })
       ]
+    });
+    return;
+  }
+
+  if (sub === "familysim" || sub === "sim" || sub === "simulate") {
+    ensureMarriageEnabledOrThrow(settings);
+    const result = await awardFamilySimulationInteraction({
+      userId: message.author.id,
+      guildId: message.guildId,
+      username: message.author.username
+    });
+    await message.reply({
+      embeds: [buildFamilySimulationResultEmbed(result, message.author)],
+      components: buildFamilySimulationPanelComponents(message.author.id)
+    });
+    return;
+  }
+
+  if (sub === "familysimstats" || sub === "simstats" || sub === "simlog") {
+    ensureMarriageEnabledOrThrow(settings);
+    const stats = await getFamilySimulationAnalytics(message.author.id);
+    await message.reply({
+      embeds: [buildFamilySimulationStatsEmbed(stats, message.author)],
+      components: buildFamilySimulationPanelComponents(message.author.id)
+    });
+    return;
+  }
+
+  if (sub === "familysimmilestones" || sub === "simmilestones" || sub === "simmile") {
+    ensureMarriageEnabledOrThrow(settings);
+    const board = await getFamilySimulationMilestoneBoard(message.author.id);
+    await message.reply({
+      embeds: [buildFamilySimulationMilestonesEmbed(board, message.author)],
+      components: buildFamilySimulationPanelComponents(message.author.id)
+    });
+    return;
+  }
+
+  if (sub === "familysimladder" || sub === "simladder" || sub === "ladder") {
+    ensureMarriageEnabledOrThrow(settings);
+    const ladder = await getFamilySimulationLadder({ userId: message.author.id, limit: 10 });
+    await message.reply({
+      embeds: [buildFamilySimulationLadderEmbed(ladder, message.author)],
+      components: buildFamilySimulationPanelComponents(message.author.id)
+    });
+    return;
+  }
+
+  if (sub === "familysimpanel" || sub === "simpanel") {
+    ensureMarriageEnabledOrThrow(settings);
+    const stats = await getFamilySimulationAnalytics(message.author.id);
+    await message.reply({
+      embeds: [buildFamilySimulationRecentEmbed(stats, message.author)],
+      components: buildFamilySimulationPanelComponents(message.author.id)
     });
     return;
   }
@@ -1223,6 +1313,52 @@ async function runFamily({ message, args }: PrefixContext) {
               `Days Together: **${Math.max(0, Math.floor((Date.now() - d.getTime()) / 86_400_000))}**`
             ].join("\n")
           )
+      ]
+    });
+    return;
+  }
+
+  if (sub === "anniversaryclaim") {
+    ensureMarriageEnabledOrThrow(settings);
+    const result = await claimAnniversaryReward({
+      userId: message.author.id,
+      guildId: message.guildId
+    });
+    await message.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0x15ff00)
+          .setTitle("💍 Anniversary Reward Claimed")
+          .setDescription(
+            [
+              `Partner: <@${result.partnerId}>`,
+              `Days Together: **${result.daysTogether}**`,
+              `+${result.rewards.xp} XP • +${result.rewards.coins} coins • +${result.rewards.bondXp} bond XP`
+            ].join("\n")
+          )
+          .setFooter({ text: "Team Tatsui ❤️" })
+      ]
+    });
+    return;
+  }
+
+  if (sub === "familyevent") {
+    const event = getCurrentFamilyEvent();
+    await message.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0xf72585)
+          .setTitle(`🎊 ${event.name}`)
+          .setDescription(
+            [
+              event.description,
+              "",
+              `Bonus: ${event.bonusText}`,
+              `Started: <t:${Math.floor(event.startsAt.getTime() / 1000)}:D>`,
+              `Ends: <t:${Math.floor(event.endsAt.getTime() / 1000)}:R>`
+            ].join("\n")
+          )
+          .setFooter({ text: "Team Tatsui ❤️" })
       ]
     });
     return;
@@ -1396,8 +1532,74 @@ async function runFamily({ message, args }: PrefixContext) {
     return;
   }
 
+  if (sub === "familyachievements") {
+    const board = await getFamilyAchievements(message.author.id, message.guildId);
+    const fmt = (rows: Array<{ title: string; progress: number; target: number; rewardXp: number; rewardCoins: number; rewardBondXp: number; completed: boolean; claimed: boolean }>) =>
+      rows
+        .map((a, i) =>
+          [
+            `${i + 1}. ${a.claimed ? "🏆" : a.completed ? "✅" : "▫️"} ${a.title}`,
+            `▸ Reward: \`${a.rewardXp} XP\` • \`${a.rewardCoins} coins\` • \`${a.rewardBondXp} bond XP\``,
+            `▸ Progress: \`[${Math.min(a.progress, a.target)}/${a.target}]\` ${a.claimed ? "• \`CLAIMED\`" : ""}`
+          ].join("\n")
+        )
+        .join("\n\n");
+    await message.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0xf72585)
+          .setAuthor({
+            name: `${message.author.displayName}'s Family Achievements`,
+            iconURL: message.author.displayAvatarURL()
+          })
+          .setDescription(`Unlocked: **${board.unlocked}/${board.total}**`)
+          .addFields({ name: "🏆 Achievement Board", value: fmt(board.achievements) || "No achievements yet." })
+          .setFooter({ text: "Permanent milestones. Claim once forever." })
+      ],
+      components: buildFamilyAchievementClaimComponents(message.author.id)
+    });
+    return;
+  }
+
+  if (sub === "familyachieveclaim") {
+    const key = args[1] ? String(args[1]) : undefined;
+    const result = await claimFamilyAchievementRewards({
+      userId: message.author.id,
+      guildId: message.guildId,
+      key
+    });
+    if (result.claimed.length === 0) {
+      await message.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0xf72585)
+            .setDescription("No completed unclaimed achievements found.")
+            .setFooter({ text: "Team Tatsui ❤️" })
+        ]
+      });
+      return;
+    }
+    await message.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0x15ff00)
+          .setTitle("Achievement Rewards Claimed!")
+          .setDescription(
+            [
+              `Claimed: **${result.claimed.length}** achievement(s)`,
+              `+${result.totals.xp} XP • +${result.totals.coins} coins • +${result.totals.bondXp} bond XP`,
+              "",
+              result.claimed.map((a) => `• ${a.title}`).join("\n")
+            ].join("\n")
+          )
+          .setFooter({ text: "Team Tatsui ❤️" })
+      ]
+    });
+    return;
+  }
+
   await message.reply({
-    embeds: [usageEmbed("family <marry|divorce|partner|date|anniversary|profile|siblings|siblingadd|siblingremove|coupleleaderboard|leaderboard|bondstatus|familyquests>", "Unknown Family Subcommand")]
+    embeds: [usageEmbed("family <marry|divorce|partner|date|familysim|familysimstats|familysimmilestones|familysimladder|familysimpanel|anniversary|anniversaryclaim|familyevent|profile|siblings|siblingadd|siblingremove|coupleleaderboard|leaderboard|bondstatus|familyquests|familyachievements|familyachieveclaim>", "Unknown Family Subcommand")]
   });
 }
 
@@ -1408,6 +1610,8 @@ function asFamilyCtx(ctx: PrefixContext, sub: string): PrefixContext {
 async function runProfile({ message, args }: PrefixContext) {
   const { user } = pickSingleUser(message, args);
   const profile = await getProfile(user.id, message.guildId, user.username);
+  const identity = await getRelationshipIdentity(user.id);
+  const familyAchievements = await getFamilyAchievements(user.id, message.guildId);
   const activeRelationshipEffects = await getActiveRelationshipEffects(user.id);
   const progressBar = Math.max(0, Math.min(100, Math.floor((profile.levelProgress / profile.levelRequired) * 100)));
 
@@ -1438,6 +1642,14 @@ async function runProfile({ message, args }: PrefixContext) {
                 activeRelationshipEffects.map((e: string) => `> ${e}`).join("\n")
               ].join("\n")
             : "```diff\n- No active relationship aura right now\n```"
+      },
+      {
+        name: "🏷 Relationship Identity",
+        value: `Title: **${identity.title}**\nBadges: ${identity.badges.length > 0 ? identity.badges.join(" • ") : "None"}`
+      },
+      {
+        name: "🏆 Family Achievements",
+        value: `Unlocked: **${familyAchievements.unlocked}/${familyAchievements.total}** • Claimed: **${familyAchievements.claimed}**`
       }
     )
     .setFooter({ text: "CoCo-sui Progression" });
@@ -1775,8 +1987,29 @@ export async function handlePrefixCommand(message: Message) {
       case "date":
         await runFamily(asFamilyCtx(ctx, "date"));
         return;
+      case "familysim":
+        await runFamily(asFamilyCtx(ctx, "familysim"));
+        return;
+      case "familysimstats":
+        await runFamily(asFamilyCtx(ctx, "familysimstats"));
+        return;
+      case "familysimmilestones":
+        await runFamily(asFamilyCtx(ctx, "familysimmilestones"));
+        return;
+      case "familysimladder":
+        await runFamily(asFamilyCtx(ctx, "familysimladder"));
+        return;
+      case "familysimpanel":
+        await runFamily(asFamilyCtx(ctx, "familysimpanel"));
+        return;
       case "anniversary":
         await runFamily(asFamilyCtx(ctx, "anniversary"));
+        return;
+      case "anniversaryclaim":
+        await runFamily(asFamilyCtx(ctx, "anniversaryclaim"));
+        return;
+      case "familyevent":
+        await runFamily(asFamilyCtx(ctx, "familyevent"));
         return;
       case "familyprofile":
         await runFamily(asFamilyCtx(ctx, "profile"));
@@ -1801,6 +2034,12 @@ export async function handlePrefixCommand(message: Message) {
         return;
       case "familyquests":
         await runFamily(asFamilyCtx(ctx, "familyquests"));
+        return;
+      case "familyachievements":
+        await runFamily(asFamilyCtx(ctx, "familyachievements"));
+        return;
+      case "familyachieveclaim":
+        await runFamily(asFamilyCtx(ctx, "familyachieveclaim"));
         return;
       case "profile":
         await runProfile(ctx);

@@ -88,6 +88,7 @@ model DiscordUser {
   transactions   Transaction[]
   familyQuestClaims FamilyQuestClaim[]
   relationshipItems RelationshipInventory[]
+  familyAchievementClaims FamilyAchievementClaim[]
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
 }
@@ -251,6 +252,14 @@ model SocialRelationshipProgress {
   questsCompleted      Int      @default(0)
   anniversaryClaimedAt DateTime?
   lastDateAt           DateTime?
+  lastSimulationAt     DateTime?
+  simWinStreak         Int      @default(0)
+  simBestWinStreak     Int      @default(0)
+  simMilestoneMask     Int      @default(0)
+  simSeasonKey         String?
+  simSeasonPoints      Int      @default(0)
+  simSeasonTier        String   @default("UNRANKED")
+  simSeasonRewardMask  Int      @default(0)
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
@@ -322,6 +331,22 @@ model RelationshipInventory {
   @@index([userId])
 }
 
+model FamilyAchievementClaim {
+  id          String   @id @default(cuid())
+  userId      String
+  guildId     String?
+  achievementKey String
+  rewardXP    Int
+  rewardCoins Int
+  rewardBondXp Int @default(0)
+  createdAt   DateTime @default(now())
+
+  user DiscordUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, guildId, achievementKey])
+  @@index([userId, createdAt])
+}
+
 enum RelationshipType {
   PARTNER
   SIBLING
@@ -339,6 +364,7 @@ enum RelationshipEventType {
   REJECTED
   DIVORCED
   DATE_COMPLETED
+  SIMULATION_COMPLETED
   STREAK_UPDATED
   QUEST_COMPLETED
   ANNIVERSARY_CLAIMED

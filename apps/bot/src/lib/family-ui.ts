@@ -9,7 +9,7 @@ import {
   type User
 } from "discord.js";
 import { logger } from "./logger.js";
-import { getFamilyProfile } from "./family.js";
+import { getFamilyProfile, getPartnerBadges, getPartnerTitle } from "./family.js";
 import { getActiveRelationshipEffects } from "./relationship-items.js";
 import { getAvatarUrl } from "./user-avatar.js";
 
@@ -90,6 +90,26 @@ function buildOverviewEmbed(
   profile: Awaited<ReturnType<typeof getFamilyProfile>>,
   activeEffects: string[]
 ) {
+  const identityTitle = profile.partner
+    ? getPartnerTitle({
+        bondLevel: profile.partner.bondLevel ?? 1,
+        totalDates: profile.partner.totalDates ?? 0,
+        streak: profile.partner.streak ?? 0,
+        bestStreak: profile.partner.bestStreak ?? 0,
+        bondScore: profile.partner.bondScore ?? 0,
+        since: new Date(profile.partner.since)
+      })
+    : "Solo Drifter";
+  const identityBadges = profile.partner
+    ? getPartnerBadges({
+        bondLevel: profile.partner.bondLevel ?? 1,
+        totalDates: profile.partner.totalDates ?? 0,
+        streak: profile.partner.streak ?? 0,
+        bestStreak: profile.partner.bestStreak ?? 0,
+        bondScore: profile.partner.bondScore ?? 0,
+        since: new Date(profile.partner.since)
+      })
+    : [];
   return new EmbedBuilder()
     .setColor(FAMILY_COLOR)
     .setAuthor({
@@ -117,6 +137,13 @@ function buildOverviewEmbed(
               activeEffects.map((e: string) => `> ${e}`).join("\n")
             ].join("\n")
           : "```diff\n- No active relationship aura right now\n```"
+    }, {
+      name: "🏷 Relationship Identity",
+      value:
+        [
+          `Title: **${identityTitle}**`,
+          `Badges: ${identityBadges.length > 0 ? identityBadges.join(" • ") : "None"}`
+        ].join("\n")
     })
     .setFooter(familyFooter());
 }
@@ -140,6 +167,22 @@ function buildPartnerEmbed(
   }
 
   const since = new Date(profile.partner.since);
+  const partnerTitle = getPartnerTitle({
+    bondLevel: profile.partner.bondLevel ?? 1,
+    totalDates: profile.partner.totalDates ?? 0,
+    streak: profile.partner.streak ?? 0,
+    bestStreak: profile.partner.bestStreak ?? 0,
+    bondScore: profile.partner.bondScore ?? 0,
+    since
+  });
+  const partnerBadges = getPartnerBadges({
+    bondLevel: profile.partner.bondLevel ?? 1,
+    totalDates: profile.partner.totalDates ?? 0,
+    streak: profile.partner.streak ?? 0,
+    bestStreak: profile.partner.bestStreak ?? 0,
+    bondScore: profile.partner.bondScore ?? 0,
+    since
+  });
   return base
     .setAuthor({
       name: `${target.username}, you are happily married to ${profile.partner.username ?? "your partner"}`,
@@ -149,7 +192,9 @@ function buildPartnerEmbed(
       [
         `Married since ${since.toDateString()} (${daysSince(since)} days) ! The Perfect Cuple <3 UwU.`,
         `You've dated \`${profile.partner.totalDates}\` times ~Damn!`,
-        `> And Your UwU score is \`${profile.partner.bondScore}\`! Pretty Good :smirk:`
+        `> And Your UwU score is \`${profile.partner.bondScore}\`! Pretty Good :smirk:`,
+        `Relationship Title: **${partnerTitle}**`,
+        `Badges: ${partnerBadges.length > 0 ? partnerBadges.join(" • ") : "None"}`
       ].join("\n")
     );
 }

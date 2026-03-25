@@ -3,7 +3,12 @@ import { performance } from "node:perf_hooks";
 import { commands, commandMap } from "./commands/index.js";
 import { env } from "./env.js";
 import { registerMessageCreate } from "./events/message-create.js";
-import { handleFamilyProposalButton, handleFamilyQuestButton } from "./lib/family.js";
+import {
+  handleFamilyAchievementButton,
+  handleFamilySimulationPanelButton,
+  handleFamilyProposalButton,
+  handleFamilyQuestButton
+} from "./lib/family.js";
 import { handleFamilyPanelButton } from "./lib/family-ui.js";
 import { handleHelpButton, handleHelpSelect } from "./lib/help-view.js";
 import { logger } from "./lib/logger.js";
@@ -134,6 +139,10 @@ client.on("interactionCreate", async (interaction) => {
     if (handledFamily) return;
     const handledFamilyQuest = await handleFamilyQuestButton(interaction);
     if (handledFamilyQuest) return;
+    const handledFamilyAchievement = await handleFamilyAchievementButton(interaction);
+    if (handledFamilyAchievement) return;
+    const handledFamilySimulationPanel = await handleFamilySimulationPanelButton(interaction);
+    if (handledFamilySimulationPanel) return;
     const handledFamilyPanel = await handleFamilyPanelButton(interaction, client);
     if (handledFamilyPanel) return;
     const handled = await handleHelpButton(interaction);

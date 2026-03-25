@@ -2,7 +2,17 @@ import { EmbedBuilder, MessageFlags, SlashCommandBuilder } from "discord.js";
 import type { SlashCommand } from "../types/command.js";
 import {
   awardDateInteraction,
+  awardFamilySimulationInteraction,
+  buildFamilySimulationLadderEmbed,
+  buildFamilySimulationMilestonesEmbed,
+  buildFamilySimulationPanelComponents,
+  buildFamilySimulationRecentEmbed,
+  buildFamilySimulationResultEmbed,
+  buildFamilySimulationStatsEmbed,
+  buildFamilyAchievementClaimComponents,
   buildProposalMessage,
+  claimAnniversaryReward,
+  claimFamilyAchievementRewards,
   createProposal,
   endPartnerRelationship,
   ensureFamilyEnabledOrThrow,
@@ -13,11 +23,16 @@ import {
   getFamilyProfile,
   getFamilySettings,
   getFamilyQuestBoard,
+  getFamilyAchievements,
+  getFamilySimulationAnalytics,
+  getFamilySimulationLadder,
+  getFamilySimulationMilestoneBoard,
   buildFamilyQuestClaimComponents,
   scheduleProposalTimeout,
   getTopFamilyLeaderboard,
   removeSibling
 } from "../lib/family.js";
+import { getCurrentFamilyEvent } from "../lib/family-events.js";
 import {
   buildCoupleLeaderboardEmbed,
   buildFamilyLeaderboardEmbed,
@@ -211,14 +226,104 @@ const dateCommand: SlashCommand = {
               `💞 | You've dated ${totalDates} times!`,
               `And Your UwU score is \`${uwuScore}\`! Pretty Good :smirk:`,
               "",
+              `\`Tier:\` **${result.scenarioTier}**`,
+              `\`Event:\` **${result.event.name}**`,
               `*${result.scenario}*`,
-              result.rareBonus > 0 ? `✨ Rare bonus: +${result.rareBonus}` : null
+              result.rareBonus > 0 ? `✨ Rare bonus: +${result.rareBonus}` : null,
+              `🎉 ${result.event.bonusText} (ends <t:${Math.floor(new Date(result.event.endsAt).getTime() / 1000)}:R>)`
             ]
               .filter(Boolean)
               .join("\n")
           )
           .setFooter({ text: "Team Tatsui ❤️" })
       ]
+    });
+  }
+};
+
+const familySimCommand: SlashCommand = {
+  data: new SlashCommandBuilder().setName("familysim").setDescription("Run a family simulation with your partner."),
+  async execute(interaction) {
+    const settings = await getFamilySettings(interaction.guildId);
+    ensureFamilyEnabledOrThrow(settings);
+    ensureMarriageEnabledOrThrow(settings);
+    await interaction.deferReply();
+    const result = await awardFamilySimulationInteraction({
+      userId: interaction.user.id,
+      guildId: interaction.guildId,
+      username: interaction.user.username
+    });
+    await interaction.editReply({
+      embeds: [buildFamilySimulationResultEmbed(result, interaction.user)],
+      components: buildFamilySimulationPanelComponents(interaction.user.id)
+    });
+  }
+};
+
+const familySimStatsCommand: SlashCommand = {
+  data: new SlashCommandBuilder()
+    .setName("familysimstats")
+    .setDescription("View family simulation analytics and recent outcomes."),
+  async execute(interaction) {
+    const settings = await getFamilySettings(interaction.guildId);
+    ensureFamilyEnabledOrThrow(settings);
+    ensureMarriageEnabledOrThrow(settings);
+    await interaction.deferReply();
+    const stats = await getFamilySimulationAnalytics(interaction.user.id);
+    await interaction.editReply({
+      embeds: [buildFamilySimulationStatsEmbed(stats, interaction.user)],
+      components: buildFamilySimulationPanelComponents(interaction.user.id)
+    });
+  }
+};
+
+const familySimMilestonesCommand: SlashCommand = {
+  data: new SlashCommandBuilder()
+    .setName("familysimmilestones")
+    .setDescription("View simulation milestone progress and rewards."),
+  async execute(interaction) {
+    const settings = await getFamilySettings(interaction.guildId);
+    ensureFamilyEnabledOrThrow(settings);
+    ensureMarriageEnabledOrThrow(settings);
+    await interaction.deferReply();
+    const board = await getFamilySimulationMilestoneBoard(interaction.user.id);
+    await interaction.editReply({
+      embeds: [buildFamilySimulationMilestonesEmbed(board, interaction.user)],
+      components: buildFamilySimulationPanelComponents(interaction.user.id)
+    });
+  }
+};
+
+const familySimLadderCommand: SlashCommand = {
+  data: new SlashCommandBuilder()
+    .setName("familysimladder")
+    .setDescription("View weekly seasonal simulation ladder."),
+  async execute(interaction) {
+    const settings = await getFamilySettings(interaction.guildId);
+    ensureFamilyEnabledOrThrow(settings);
+    ensureMarriageEnabledOrThrow(settings);
+    await interaction.deferReply();
+    const ladder = await getFamilySimulationLadder({ userId: interaction.user.id, limit: 10 });
+    await interaction.editReply({
+      embeds: [buildFamilySimulationLadderEmbed(ladder, interaction.user)],
+      components: buildFamilySimulationPanelComponents(interaction.user.id)
+    });
+  }
+};
+
+const familySimPanelCommand: SlashCommand = {
+  data: new SlashCommandBuilder()
+    .setName("familysimpanel")
+    .setDescription("Open interactive family simulation control panel."),
+  async execute(interaction) {
+    const settings = await getFamilySettings(interaction.guildId);
+    ensureFamilyEnabledOrThrow(settings);
+    ensureMarriageEnabledOrThrow(settings);
+    await interaction.deferReply();
+    const stats = await getFamilySimulationAnalytics(interaction.user.id);
+    await interaction.editReply({
+      embeds: [buildFamilySimulationRecentEmbed(stats, interaction.user)],
+      components: buildFamilySimulationPanelComponents(interaction.user.id)
     });
   }
 };
@@ -253,6 +358,58 @@ const anniversaryCommand: SlashCommand = {
               `Partner: <@${profile.partner.userId}>`,
               `Started: <t:${Math.floor(d.getTime() / 1000)}:D>`,
               `Days Together: **${daysSince(d)}**`
+            ].join("\n")
+          )
+          .setFooter({ text: "Team Tatsui ❤️" })
+      ]
+    });
+  }
+};
+
+const anniversaryClaimCommand: SlashCommand = {
+  data: new SlashCommandBuilder().setName("anniversaryclaim").setDescription("Claim monthly anniversary rewards."),
+  async execute(interaction) {
+    const settings = await getFamilySettings(interaction.guildId);
+    ensureFamilyEnabledOrThrow(settings);
+    ensureMarriageEnabledOrThrow(settings);
+    const result = await claimAnniversaryReward({
+      userId: interaction.user.id,
+      guildId: interaction.guildId
+    });
+    await interaction.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0x15ff00)
+          .setTitle("💍 Anniversary Reward Claimed")
+          .setDescription(
+            [
+              `Partner: <@${result.partnerId}>`,
+              `Days Together: **${result.daysTogether}**`,
+              `+${result.rewards.xp} XP • +${result.rewards.coins} coins • +${result.rewards.bondXp} bond XP`
+            ].join("\n")
+          )
+          .setFooter({ text: "Team Tatsui ❤️" })
+      ]
+    });
+  }
+};
+
+const familyEventCommand: SlashCommand = {
+  data: new SlashCommandBuilder().setName("familyevent").setDescription("View this week's active family event."),
+  async execute(interaction) {
+    const event = getCurrentFamilyEvent();
+    await interaction.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0xf72585)
+          .setTitle(`🎊 ${event.name}`)
+          .setDescription(
+            [
+              event.description,
+              "",
+              `Bonus: ${event.bonusText}`,
+              `Started: <t:${Math.floor(event.startsAt.getTime() / 1000)}:D>`,
+              `Ends: <t:${Math.floor(event.endsAt.getTime() / 1000)}:R>`
             ].join("\n")
           )
           .setFooter({ text: "Team Tatsui ❤️" })
@@ -478,12 +635,98 @@ const familyQuestsCommand: SlashCommand = {
   }
 };
 
+const familyAchievementsCommand: SlashCommand = {
+  data: new SlashCommandBuilder().setName("familyachievements").setDescription("View permanent family achievements."),
+  async execute(interaction) {
+    const settings = await getFamilySettings(interaction.guildId);
+    ensureFamilyEnabledOrThrow(settings);
+    await interaction.deferReply();
+    const board = await getFamilyAchievements(interaction.user.id, interaction.guildId);
+    const fmt = (rows: Array<{ title: string; progress: number; target: number; rewardXp: number; rewardCoins: number; rewardBondXp: number; completed: boolean; claimed: boolean }>) =>
+      rows
+        .map((a, i) =>
+          [
+            `${i + 1}. ${a.claimed ? "🏆" : a.completed ? "✅" : "▫️"} ${a.title}`,
+            `▸ Reward: \`${a.rewardXp} XP\` • \`${a.rewardCoins} coins\` • \`${a.rewardBondXp} bond XP\``,
+            `▸ Progress: \`[${Math.min(a.progress, a.target)}/${a.target}]\` ${a.claimed ? "• `CLAIMED`" : ""}`
+          ].join("\n")
+        )
+        .join("\n\n");
+    await interaction.editReply({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0xf72585)
+          .setAuthor({
+            name: `${interaction.user.displayName}'s Family Achievements`,
+            iconURL: interaction.user.displayAvatarURL()
+          })
+          .setDescription(`Unlocked: **${board.unlocked}/${board.total}**`)
+          .addFields({ name: "🏆 Achievement Board", value: fmt(board.achievements) || "No achievements yet." })
+          .setFooter({ text: "Permanent milestones. Claim once forever." })
+      ],
+      components: buildFamilyAchievementClaimComponents(interaction.user.id)
+    });
+  }
+};
+
+const familyAchieveClaimCommand: SlashCommand = {
+  data: new SlashCommandBuilder()
+    .setName("familyachieveclaim")
+    .setDescription("Claim completed family achievements.")
+    .addStringOption((o) => o.setName("key").setDescription("Specific achievement key")),
+  async execute(interaction) {
+    const settings = await getFamilySettings(interaction.guildId);
+    ensureFamilyEnabledOrThrow(settings);
+    const key = interaction.options.getString("key") ?? undefined;
+    const result = await claimFamilyAchievementRewards({
+      userId: interaction.user.id,
+      guildId: interaction.guildId,
+      key
+    });
+    if (result.claimed.length === 0) {
+      await interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0xf72585)
+            .setDescription("No completed unclaimed achievements found.")
+            .setFooter({ text: "Team Tatsui ❤️" })
+        ],
+        flags: MessageFlags.Ephemeral
+      });
+      return;
+    }
+    await interaction.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0x15ff00)
+          .setTitle("Achievement Rewards Claimed!")
+          .setDescription(
+            [
+              `Claimed: **${result.claimed.length}** achievement(s)`,
+              `+${result.totals.xp} XP • +${result.totals.coins} coins • +${result.totals.bondXp} bond XP`,
+              "",
+              result.claimed.map((a) => `• ${a.title}`).join("\n")
+            ].join("\n")
+          )
+          .setFooter({ text: "Team Tatsui ❤️" })
+      ]
+    });
+  }
+};
+
 export const familyCommands: SlashCommand[] = [
   marryCommand,
   divorceCommand,
   partnerCommand,
   dateCommand,
+  familySimCommand,
+  familySimStatsCommand,
+  familySimMilestonesCommand,
+  familySimLadderCommand,
+  familySimPanelCommand,
   anniversaryCommand,
+  anniversaryClaimCommand,
+  familyEventCommand,
   familyProfileCommand,
   siblingsCommand,
   siblingAddCommand,
@@ -492,4 +735,7 @@ export const familyCommands: SlashCommand[] = [
   familyLeaderboardCommand,
   bondStatusCommand,
   familyQuestsCommand
+  ,
+  familyAchievementsCommand,
+  familyAchieveClaimCommand
 ];

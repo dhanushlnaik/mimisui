@@ -1,4 +1,5 @@
 import { EmbedBuilder, SlashCommandBuilder } from "discord.js";
+import { getFamilyAchievements, getRelationshipIdentity } from "../lib/family.js";
 import { getProfile } from "../lib/progression.js";
 import { getActiveRelationshipEffects } from "../lib/relationship-items.js";
 import { getAvatarUrl } from "../lib/user-avatar.js";
@@ -28,6 +29,8 @@ export const profileCommand: SlashCommand = {
     const useCard = interaction.options.getBoolean("card") ?? true;
 
     const profile = await getProfile(user.id, interaction.guildId, user.username);
+    const identity = await getRelationshipIdentity(user.id);
+    const familyAchievements = await getFamilyAchievements(user.id, interaction.guildId);
     const activeRelationshipEffects = await getActiveRelationshipEffects(user.id);
     const progressBar = Math.max(0, Math.min(100, Math.floor((profile.levelProgress / profile.levelRequired) * 100)));
 
@@ -67,6 +70,14 @@ export const profileCommand: SlashCommand = {
                   activeRelationshipEffects.map((e: string) => `> ${e}`).join("\n")
                 ].join("\n")
               : "```diff\n- No active relationship aura right now\n```"
+        },
+        {
+          name: "🏷 Relationship Identity",
+          value: `Title: **${identity.title}**\nBadges: ${identity.badges.length > 0 ? identity.badges.join(" • ") : "None"}`
+        },
+        {
+          name: "🏆 Family Achievements",
+          value: `Unlocked: **${familyAchievements.unlocked}/${familyAchievements.total}** • Claimed: **${familyAchievements.claimed}**`
         }
       )
       .setFooter({ text: "CoCo-sui Progression" });
