@@ -1,5 +1,6 @@
 import { EmbedBuilder, SlashCommandBuilder } from "discord.js";
 import { getProfile } from "../lib/progression.js";
+import { getActiveRelationshipEffects } from "../lib/relationship-items.js";
 import { getAvatarUrl } from "../lib/user-avatar.js";
 import { callWeebyCustom, weebyAttachment } from "../lib/weeby.js";
 import type { SlashCommand } from "../types/command.js";
@@ -27,6 +28,7 @@ export const profileCommand: SlashCommand = {
     const useCard = interaction.options.getBoolean("card") ?? true;
 
     const profile = await getProfile(user.id, interaction.guildId, user.username);
+    const activeRelationshipEffects = await getActiveRelationshipEffects(user.id);
     const progressBar = Math.max(0, Math.min(100, Math.floor((profile.levelProgress / profile.levelRequired) * 100)));
 
     const embed = new EmbedBuilder()
@@ -53,6 +55,18 @@ export const profileCommand: SlashCommand = {
                   .map((b: any) => `${b.type.toUpperCase()} x${b.multiplier} until <t:${Math.floor(new Date(b.expiresAt).getTime() / 1000)}:R>`)
                   .join("\n")
               : "None"
+        },
+        {
+          name: "💞 Active Relationship Effects",
+          value:
+            activeRelationshipEffects.length > 0
+              ? [
+                  "```diff",
+                  "+ Relationship Aura Active",
+                  "```",
+                  activeRelationshipEffects.map((e: string) => `> ${e}`).join("\n")
+                ].join("\n")
+              : "```diff\n- No active relationship aura right now\n```"
         }
       )
       .setFooter({ text: "CoCo-sui Progression" });

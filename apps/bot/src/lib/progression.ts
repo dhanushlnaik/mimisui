@@ -1,4 +1,7 @@
 import { db } from "@cocosui/db";
+import { performance } from "node:perf_hooks";
+import { logger } from "./logger.js";
+import { recordDbTiming } from "./perf-context.js";
 
 const pdb = db as any;
 
@@ -16,6 +19,22 @@ const spamMemory = new Map<
     sameCount: number;
   }
 >();
+const BOOST_CACHE_TTL_MS = 10_000;
+const boostCache = new Map<string, { value: any; expiresAt: number }>();
+
+async function timedDb<T = any>(label: string, task: () => Promise<T>) {
+  const start = performance.now();
+  try {
+    return await task();
+  } finally {
+    const msRaw = performance.now() - start;
+    const ms = Math.round(msRaw);
+    recordDbTiming(`progression:${label}`, msRaw);
+    if (ms >= 250) {
+      logger.warn(`Slow DB op: ${label} ${ms}ms`);
+    }
+  }
+}
 
 type QuestTemplate = {
   type: "daily" | "weekly";
@@ -75,27 +94,44 @@ function computeLevel(totalXp: number) {
   return { level, currentLevelXp, nextLevelXp };
 }
 
-async function ensureProgress(userId: string, guildId: string | null, username: string) {
-  await pdb.discordUser.upsert({
+async function ensureProgress(userId: string, guildId: string | null, username: string): Promise<any> {
+  await timedDb("discordUser.upsert(ensureProgress)", () => pdb.discordUser.upsert({
     where: { id: userId },
     update: { username },
     create: { id: userId, username }
-  });
+  }));
 
-  const progress = await pdb.userProgress.upsert({
-    where: { userId },
-    update: guildId ? { guildId } : {},
-    create: { userId, guildId, title: "Rookie", level: 1, xp: 0, coins: 0 }
-  });
+  const existing = await timedDb("userProgress.findUnique(ensureProgress)", () =>
+    pdb.userProgress.findUnique({ where: { userId } })
+  );
+  if (existing) {
+    if (guildId && existing.guildId !== guildId) {
+      return timedDb("userProgress.update(ensureProgress.guildId)", () =>
+        pdb.userProgress.update({
+          where: { userId },
+          data: { guildId }
+        })
+      );
+    }
+    return existing;
+  }
 
-  return progress;
+  return timedDb("userProgress.create(ensureProgress)", () =>
+    pdb.userProgress.create({
+      data: { userId, guildId, title: "Rookie", level: 1, xp: 0, coins: 0 }
+    })
+  );
 }
 
-async function getBoostMultipliers(userId: string) {
+async function getBoostMultipliers(userId: string): Promise<any> {
+  const cached = boostCache.get(userId);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.value;
+  }
   const now = new Date();
-  const active = await pdb.booster.findMany({
+  const active = await timedDb("booster.findMany(getBoostMultipliers)", () => pdb.booster.findMany({
     where: { userId, expiresAt: { gt: now } }
-  });
+  }));
 
   let xpMultiplier = 1;
   let coinMultiplier = 1;
@@ -103,7 +139,9 @@ async function getBoostMultipliers(userId: string) {
     if (b.type === "xp") xpMultiplier *= b.multiplier;
     if (b.type === "coin") coinMultiplier *= b.multiplier;
   }
-  return { xpMultiplier, coinMultiplier, active };
+  const resolved = { xpMultiplier, coinMultiplier, active };
+  boostCache.set(userId, { value: resolved, expiresAt: Date.now() + BOOST_CACHE_TTL_MS });
+  return resolved;
 }
 
 function antiSpamMultiplier(userId: string, commandName: string, nowMs: number) {
@@ -169,13 +207,13 @@ async function applyQuestProgress(
 
   const day = todayKey();
   const week = weekKey();
-  const quests = await pdb.userQuest.findMany({
+  const quests = await timedDb("userQuest.findMany(applyQuestProgress)", () => pdb.userQuest.findMany({
     where: {
       userId,
       guildId,
       OR: [{ periodKey: day }, { periodKey: week }]
     }
-  });
+  }));
 
   const increments = new Map<string, number>();
   increments.set("any_command", 1);
@@ -196,14 +234,14 @@ async function applyQuestProgress(
     const nextProgress = Math.min(quest.target, quest.progress + inc);
     const isNowCompleted = nextProgress >= quest.target;
 
-    await pdb.userQuest.update({
+    await timedDb("userQuest.update(applyQuestProgress)", () => pdb.userQuest.update({
       where: { id: quest.id },
       data: {
         progress: nextProgress,
         completed: isNowCompleted || quest.completed,
         claimed: isNowCompleted ? true : quest.claimed
       }
-    });
+    }));
 
     if (isNowCompleted && !quest.claimed) {
       rewardXP += quest.rewardXP;
@@ -261,7 +299,7 @@ export async function grantCommandProgress(input: {
   const after = computeLevel(afterTotalXp);
   const newTitle = titleForLevel(after.level);
 
-  await pdb.userProgress.update({
+  await timedDb("userProgress.update(grantCommandProgress)", () => pdb.userProgress.update({
     where: { userId: input.userId },
     data: {
       guildId: input.guildId,
@@ -274,16 +312,16 @@ export async function grantCommandProgress(input: {
       xpMinuteBucket: minuteBucket,
       xpMinuteGained: sameMinute ? { increment: gainedXp } : gainedXp
     }
-  });
+  }));
 
-  await pdb.transaction.create({
+  await timedDb("transaction.create(grantCommandProgress)", () => pdb.transaction.create({
     data: {
       userId: input.userId,
       guildId: input.guildId,
       amount: totalCoinGain,
       reason: questRewards.rewardCoins > 0 ? "command+quest" : "command"
     }
-  });
+  }));
 
   return {
     gainedXp: totalXpGain,
@@ -310,7 +348,7 @@ export async function claimDaily(input: { userId: string; guildId: string | null
   const coins = 120 + Math.floor(Math.random() * 101) + streak * 10;
   const after = computeLevel(progress.xp + xp);
 
-  await pdb.userProgress.update({
+  await timedDb("userProgress.update(claimDaily)", () => pdb.userProgress.update({
     where: { userId: input.userId },
     data: {
       xp: { increment: xp },
@@ -320,16 +358,16 @@ export async function claimDaily(input: { userId: string; guildId: string | null
       dailyStreak: streak,
       lastDailyClaimDate: today
     }
-  });
+  }));
 
-  await pdb.transaction.create({
+  await timedDb("transaction.create(claimDaily)", () => pdb.transaction.create({
     data: {
       userId: input.userId,
       guildId: input.guildId,
       amount: coins,
       reason: "daily"
     }
-  });
+  }));
 
   return { claimed: true, streak, xp, coins };
 }
@@ -355,14 +393,14 @@ export async function getQuestBoard(userId: string, guildId: string | null, user
 
   const day = todayKey();
   const week = weekKey();
-  const quests = await pdb.userQuest.findMany({
+  const quests = await timedDb("userQuest.findMany(getQuestBoard)", () => pdb.userQuest.findMany({
     where: {
       userId,
       guildId,
       OR: [{ periodKey: day }, { periodKey: week }]
     },
     orderBy: [{ type: "asc" }, { action: "asc" }]
-  });
+  }));
 
   return quests.map((q: any) => {
     const t = QUEST_TEMPLATES.find((x) => x.action === q.action && x.type === q.type);
@@ -374,11 +412,10 @@ export async function getQuestBoard(userId: string, guildId: string | null, user
 }
 
 export async function getLeaderboard(guildId: string, limit = 10) {
-  const rows = await pdb.userProgress.findMany({
+  const rows = await timedDb("userProgress.findMany(getLeaderboard)", () => pdb.userProgress.findMany({
     where: { guildId },
     orderBy: [{ level: "desc" }, { xp: "desc" }],
     take: limit
-  });
+  }));
   return rows;
 }
-

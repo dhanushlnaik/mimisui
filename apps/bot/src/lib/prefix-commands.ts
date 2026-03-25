@@ -26,7 +26,9 @@ import {
   getBondStatus,
   getCoupleLeaderboard,
   getFamilyProfile,
+  getFamilyQuestBoard,
   getFamilySettings,
+  buildFamilyQuestClaimComponents,
   scheduleProposalTimeout,
   getTopFamilyLeaderboard,
   removeSibling
@@ -56,6 +58,14 @@ import {
 } from "./rich-media.js";
 import { getAvatarUrl } from "./user-avatar.js";
 import { callWeebyCustom, callWeebyGenerator, callWeebyOverlay, weebyAttachment } from "./weeby.js";
+import {
+  buyRelationshipItem,
+  getActiveRelationshipEffects,
+  getRelationshipInventory,
+  getRelationshipItemDefs,
+  useRelationshipItem,
+  type RelationshipItemCode
+} from "./relationship-items.js";
 import sharp from "sharp";
 
 type PrefixContext = {
@@ -115,6 +125,11 @@ const BASE_PREFIX_COMMANDS = [
   "coupleleaderboard",
   "familyleaderboard",
   "bondstatus",
+  "familyquests",
+  "relationshipshop",
+  "relationshipinventory",
+  "relationshipbuy",
+  "relationshipuse",
   "profile",
   "daily",
   "quests",
@@ -1027,7 +1042,8 @@ async function runFamily({ message, args }: PrefixContext) {
               "`family siblingremove @user`",
               "`family coupleleaderboard`",
               "`family leaderboard`",
-              "`family bondstatus @user`"
+              "`family bondstatus @user`",
+              "`family familyquests`"
             ].join("\n")
           )
           .setFooter({ text: "Team Tatsui ❤️" })
@@ -1342,8 +1358,46 @@ async function runFamily({ message, args }: PrefixContext) {
     return;
   }
 
+  if (sub === "familyquests") {
+    const board = await getFamilyQuestBoard(message.author.id, message.guildId);
+    const fmt = (quests: Array<{ title: string; progress: number; target: number; rewardXp: number; rewardCoins: number; rewardBondXp: number; completed: boolean; claimed: boolean }>) =>
+      quests
+        .map((q, i) =>
+          [
+            `${i + 1}. ${q.claimed ? "🏆" : q.completed ? "✅" : "▫️"} ${q.title}`,
+            `▸ Reward: \`${q.rewardXp} XP\` • \`${q.rewardCoins} coins\` • \`${q.rewardBondXp} bond XP\``,
+            `▸ Progress: \`[${Math.min(q.progress, q.target)}/${q.target}]\` ${q.claimed ? "• `CLAIMED`" : ""}`
+          ].join("\n")
+        )
+        .join("\n\n");
+    await message.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0xf72585)
+          .setAuthor({
+            name: `${message.author.displayName}'s Family Quest Log`,
+            iconURL: message.author.displayAvatarURL()
+          })
+          .setDescription(
+            [
+              `These quests belong to ${message.author}.`,
+              board.hasPartner ? "💍 Partner bond detected." : "💤 No active partner right now.",
+              board.hasSiblings ? "🧬 Sibling bond detected." : "🫧 No active siblings right now."
+            ].join("\n")
+          )
+          .addFields(
+            { name: "🗓 Partner Quests", value: fmt(board.partner) },
+            { name: "📆 Sibling & Family Quests", value: fmt(board.sibling) }
+          )
+          .setFooter({ text: "Progress updates automatically when you use family commands." })
+      ],
+      components: buildFamilyQuestClaimComponents(message.author.id)
+    });
+    return;
+  }
+
   await message.reply({
-    embeds: [usageEmbed("family <marry|divorce|partner|date|anniversary|profile|siblings|siblingadd|siblingremove|coupleleaderboard|leaderboard|bondstatus>", "Unknown Family Subcommand")]
+    embeds: [usageEmbed("family <marry|divorce|partner|date|anniversary|profile|siblings|siblingadd|siblingremove|coupleleaderboard|leaderboard|bondstatus|familyquests>", "Unknown Family Subcommand")]
   });
 }
 
@@ -1354,6 +1408,7 @@ function asFamilyCtx(ctx: PrefixContext, sub: string): PrefixContext {
 async function runProfile({ message, args }: PrefixContext) {
   const { user } = pickSingleUser(message, args);
   const profile = await getProfile(user.id, message.guildId, user.username);
+  const activeRelationshipEffects = await getActiveRelationshipEffects(user.id);
   const progressBar = Math.max(0, Math.min(100, Math.floor((profile.levelProgress / profile.levelRequired) * 100)));
 
   const embed = new EmbedBuilder()
@@ -1371,7 +1426,19 @@ async function runProfile({ message, args }: PrefixContext) {
       { name: "⭐ Level", value: `${profile.levelComputed}`, inline: true },
       { name: "📚 XP", value: `${profile.levelProgress}/${profile.levelRequired}`, inline: true },
       { name: "🪙 Coins", value: `${profile.coins}`, inline: true },
-      { name: "🔥 Streak", value: `${profile.dailyStreak}`, inline: true }
+      { name: "🔥 Streak", value: `${profile.dailyStreak}`, inline: true },
+      {
+        name: "💞 Active Relationship Effects",
+        value:
+          activeRelationshipEffects.length > 0
+            ? [
+                "```diff",
+                "+ Relationship Aura Active",
+                "```",
+                activeRelationshipEffects.map((e: string) => `> ${e}`).join("\n")
+              ].join("\n")
+            : "```diff\n- No active relationship aura right now\n```"
+      }
     )
     .setFooter({ text: "CoCo-sui Progression" });
 
@@ -1486,6 +1553,84 @@ async function runShop({ message }: PrefixContext) {
         .setColor(0xf59e0b)
         .setTitle("CoCo-sui Shop")
         .setDescription("XP Boost 2x (30m): 450 coins\nXP Boost 1.5x (1h): 700 coins\nCoin Boost 1.5x (1h): 600 coins")
+    ]
+  });
+}
+
+async function runRelationshipShop({ message }: PrefixContext) {
+  const items = getRelationshipItemDefs();
+  await message.reply({
+    embeds: [
+      new EmbedBuilder()
+        .setColor(0xf72585)
+        .setTitle("Relationship Shop")
+        .setDescription(
+          items
+            .map((i) => `**${i.name}** (\`${i.code}\`)\n${i.description}\nPrice: \`${i.price} coins\``)
+            .join("\n\n")
+        )
+        .setFooter({ text: "Use relationshipbuy <item> [quantity] to purchase." })
+    ]
+  });
+}
+
+async function runRelationshipInventory({ message }: PrefixContext) {
+  const inv = await getRelationshipInventory(message.author.id);
+  await message.reply({
+    embeds: [
+      new EmbedBuilder()
+        .setColor(0xf72585)
+        .setTitle("Relationship Inventory")
+        .setDescription(
+          inv.length > 0
+            ? inv.map((i: any) => `• **${i.item?.name ?? i.itemCode}** x${i.quantity} (\`${i.itemCode}\`)`).join("\n")
+            : "No relationship items in inventory."
+        )
+        .setFooter({ text: "Use relationshipuse <item> to activate an item." })
+    ]
+  });
+}
+
+async function runRelationshipBuy({ message, args }: PrefixContext) {
+  const itemCode = (args[0] ?? "").toLowerCase() as RelationshipItemCode;
+  const quantity = Number.parseInt(args[1] ?? "1", 10);
+  if (!itemCode) {
+    await message.reply("Usage: relationshipbuy <double_date_pass|bond_bloom|streak_shield> [quantity]");
+    return;
+  }
+  const result = await buyRelationshipItem({
+    userId: message.author.id,
+    guildId: message.guildId,
+    itemCode,
+    quantity: Number.isFinite(quantity) ? quantity : 1
+  });
+  await message.reply({
+    embeds: [
+      new EmbedBuilder()
+        .setColor(0x15ff00)
+        .setTitle("Purchase Successful")
+        .setDescription(`Bought: **${result.item.name}** x${result.quantity}\nCost: \`${result.totalCost} coins\``)
+    ]
+  });
+}
+
+async function runRelationshipUse({ message, args }: PrefixContext) {
+  const itemCode = (args[0] ?? "").toLowerCase() as RelationshipItemCode;
+  if (!itemCode) {
+    await message.reply("Usage: relationshipuse <double_date_pass|bond_bloom|streak_shield>");
+    return;
+  }
+  const result = await useRelationshipItem({
+    userId: message.author.id,
+    guildId: message.guildId,
+    itemCode
+  });
+  await message.reply({
+    embeds: [
+      new EmbedBuilder()
+        .setColor(0x15ff00)
+        .setTitle("Item Activated")
+        .setDescription(`**${result.item.name}** used.\n${result.effectText}`)
     ]
   });
 }
@@ -1654,6 +1799,9 @@ export async function handlePrefixCommand(message: Message) {
       case "bondstatus":
         await runFamily(asFamilyCtx(ctx, "bondstatus"));
         return;
+      case "familyquests":
+        await runFamily(asFamilyCtx(ctx, "familyquests"));
+        return;
       case "profile":
         await runProfile(ctx);
         return;
@@ -1668,6 +1816,18 @@ export async function handlePrefixCommand(message: Message) {
         return;
       case "shop":
         await runShop(ctx);
+        return;
+      case "relationshipshop":
+        await runRelationshipShop(ctx);
+        return;
+      case "relationshipinventory":
+        await runRelationshipInventory(ctx);
+        return;
+      case "relationshipbuy":
+        await runRelationshipBuy(ctx);
+        return;
+      case "relationshipuse":
+        await runRelationshipUse(ctx);
         return;
       case "triggered":
         await runTriggered(ctx);

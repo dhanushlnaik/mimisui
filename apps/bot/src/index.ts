@@ -1,11 +1,13 @@
-import { Client, GatewayIntentBits, Partials } from "discord.js";
+import { Client, GatewayIntentBits, MessageFlags, Partials } from "discord.js";
+import { performance } from "node:perf_hooks";
 import { commands, commandMap } from "./commands/index.js";
 import { env } from "./env.js";
 import { registerMessageCreate } from "./events/message-create.js";
-import { handleFamilyProposalButton } from "./lib/family.js";
+import { handleFamilyProposalButton, handleFamilyQuestButton } from "./lib/family.js";
 import { handleFamilyPanelButton } from "./lib/family-ui.js";
 import { handleHelpButton, handleHelpSelect } from "./lib/help-view.js";
 import { logger } from "./lib/logger.js";
+import { getPerfSummary, runWithPerfContext } from "./lib/perf-context.js";
 import { grantCommandProgress } from "./lib/progression.js";
 import { getAvatarUrl } from "./lib/user-avatar.js";
 import { callWeebyCustom, weebyAttachment } from "./lib/weeby.js";
@@ -63,6 +65,7 @@ async function applyInteractionProgress(
   interaction: import("discord.js").ChatInputCommandInteraction | import("discord.js").MessageContextMenuCommandInteraction,
   commandName: string
 ) {
+  const progressStart = performance.now();
   try {
     const res = await grantCommandProgress({
       userId: interaction.user.id,
@@ -93,7 +96,7 @@ async function applyInteractionProgress(
           await interaction.followUp({
             content: notices.join("\n"),
             files: [weebyAttachment("levelup", card, "png")],
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
           });
           return;
         }
@@ -105,15 +108,23 @@ async function applyInteractionProgress(
     if (notices.length > 0 && (interaction.deferred || interaction.replied)) {
       await safeInteractionResponse(interaction, "followUp", {
         content: notices.join("\n"),
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
     }
   } catch (error) {
     logger.error("Progression update failed", error);
+  } finally {
+    const progressMs = Math.round(performance.now() - progressStart);
+    if (progressMs >= 300) {
+      logger.warn(`Slow progression update: ${interaction.commandName} took ${progressMs}ms`);
+    } else {
+      logger.info(`Progression update: ${interaction.commandName} took ${progressMs}ms`);
+    }
   }
 }
 
 client.on("interactionCreate", async (interaction) => {
+  const interactionKey = `${interaction.id}:${interaction.user.id}`;
   if (interaction.isStringSelectMenu()) {
     const handled = await handleHelpSelect(interaction);
     if (handled) return;
@@ -121,6 +132,8 @@ client.on("interactionCreate", async (interaction) => {
   if (interaction.isButton()) {
     const handledFamily = await handleFamilyProposalButton(interaction);
     if (handledFamily) return;
+    const handledFamilyQuest = await handleFamilyQuestButton(interaction);
+    if (handledFamilyQuest) return;
     const handledFamilyPanel = await handleFamilyPanelButton(interaction, client);
     if (handledFamilyPanel) return;
     const handled = await handleHelpButton(interaction);
@@ -133,35 +146,85 @@ client.on("interactionCreate", async (interaction) => {
   if (!command) {
     await safeInteractionResponse(interaction, "reply", {
       content: "Unknown command.",
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
     return;
   }
 
   try {
     if (interaction.isChatInputCommand()) {
+      await runWithPerfContext(interactionKey, async () => {
+      const execStart = performance.now();
       if (command.type && command.type !== interaction.commandType) {
         await safeInteractionResponse(interaction, "reply", {
           content: "Wrong command type.",
-          ephemeral: true
+          flags: MessageFlags.Ephemeral
         });
         return;
       }
       await command.execute(interaction);
+      const execMs = Math.round(performance.now() - execStart);
+      if (execMs >= 1500) {
+        logger.warn(
+          `Slow command execute: /${interaction.commandName} ${execMs}ms (guild=${interaction.guildId ?? "dm"} user=${interaction.user.id})`
+        );
+      } else {
+        logger.info(
+          `Command execute: /${interaction.commandName} ${execMs}ms (guild=${interaction.guildId ?? "dm"} user=${interaction.user.id})`
+        );
+      }
+      const progStart = performance.now();
       await applyInteractionProgress(interaction, interaction.commandName);
+      const progMs = Math.round(performance.now() - progStart);
+      const totalMs = Math.round(performance.now() - execStart);
+      const perf = getPerfSummary();
+      logger.info(
+        `Command done: /${interaction.commandName} total=${totalMs}ms execute=${execMs}ms progression=${progMs}ms` +
+          (perf
+            ? ` dbMs=${perf.dbTotalMs} dbOps=${perf.dbOps}` +
+              (perf.topDb.length > 0 ? ` topDb=[${perf.topDb.join(", ")}]` : "")
+            : "")
+      );
+      return;
+      });
       return;
     }
 
     if (interaction.isMessageContextMenuCommand()) {
+      await runWithPerfContext(interactionKey, async () => {
+      const execStart = performance.now();
       if (command.type !== interaction.commandType) {
         await safeInteractionResponse(interaction, "reply", {
           content: "Wrong command type.",
-          ephemeral: true
+          flags: MessageFlags.Ephemeral
         });
         return;
       }
       await command.execute(interaction);
+      const execMs = Math.round(performance.now() - execStart);
+      if (execMs >= 1500) {
+        logger.warn(
+          `Slow command execute: ${interaction.commandName} ${execMs}ms (guild=${interaction.guildId ?? "dm"} user=${interaction.user.id})`
+        );
+      } else {
+        logger.info(
+          `Command execute: ${interaction.commandName} ${execMs}ms (guild=${interaction.guildId ?? "dm"} user=${interaction.user.id})`
+        );
+      }
+      const progStart = performance.now();
       await applyInteractionProgress(interaction, interaction.commandName);
+      const progMs = Math.round(performance.now() - progStart);
+      const totalMs = Math.round(performance.now() - execStart);
+      const perf = getPerfSummary();
+      logger.info(
+        `Command done: ${interaction.commandName} total=${totalMs}ms execute=${execMs}ms progression=${progMs}ms` +
+          (perf
+            ? ` dbMs=${perf.dbTotalMs} dbOps=${perf.dbOps}` +
+              (perf.topDb.length > 0 ? ` topDb=[${perf.topDb.join(", ")}]` : "")
+            : "")
+      );
+      return;
+      });
       return;
     }
   } catch (error) {
@@ -169,12 +232,12 @@ client.on("interactionCreate", async (interaction) => {
     if (interaction.deferred || interaction.replied) {
       await safeInteractionResponse(interaction, "followUp", {
         content: "Something went wrong.",
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
     } else {
       await safeInteractionResponse(interaction, "reply", {
         content: "Something went wrong.",
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
     }
   }

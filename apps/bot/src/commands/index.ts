@@ -24,6 +24,12 @@ import { prefixCommand } from "./prefix.js";
 import { profileCommand } from "./profile.js";
 import { quoteImageCommand } from "./quote.js";
 import { questsCommand } from "./quests.js";
+import {
+  relationshipBuyCommand,
+  relationshipInventoryCommand,
+  relationshipShopCommand,
+  relationshipUseCommand
+} from "./relationship.js";
 import { ripCommand } from "./rip.js";
 import { serverAvatarCommand } from "./serverav.js";
 import { serverInfoCommand } from "./serverinfo.js";
@@ -53,6 +59,10 @@ export const commands: AppCommand[] = [
   profileCommand,
   dailyCommand,
   questsCommand,
+  relationshipShopCommand,
+  relationshipInventoryCommand,
+  relationshipBuyCommand,
+  relationshipUseCommand,
   leaderboardCommand,
   shopCommand,
   enlargeCommand,

@@ -3,12 +3,14 @@ import {
   ButtonBuilder,
   ButtonStyle,
   EmbedBuilder,
+  MessageFlags,
   type ButtonInteraction,
   type Client,
   type User
 } from "discord.js";
 import { logger } from "./logger.js";
 import { getFamilyProfile } from "./family.js";
+import { getActiveRelationshipEffects } from "./relationship-items.js";
 import { getAvatarUrl } from "./user-avatar.js";
 
 export type FamilyPanelSection = "overview" | "partner" | "siblings";
@@ -85,7 +87,8 @@ function familyButtons(
 
 function buildOverviewEmbed(
   target: User,
-  profile: Awaited<ReturnType<typeof getFamilyProfile>>
+  profile: Awaited<ReturnType<typeof getFamilyProfile>>,
+  activeEffects: string[]
 ) {
   return new EmbedBuilder()
     .setColor(FAMILY_COLOR)
@@ -98,10 +101,23 @@ function buildOverviewEmbed(
       [
         `Nickname: \`${target.displayName ?? target.username}\``,
         `ID: \`${target.id}\``,
+        `Active Effects: ${activeEffects.length > 0 ? activeEffects.length : 0}`,
         "",
         "Check Family - Select desired family option using the buttons below."
       ].join("\n")
     )
+    .addFields({
+      name: "💞 Active Relationship Effects",
+      value:
+        activeEffects.length > 0
+          ? [
+              "```diff",
+              "+ Relationship Aura Active",
+              "```",
+              activeEffects.map((e: string) => `> ${e}`).join("\n")
+            ].join("\n")
+          : "```diff\n- No active relationship aura right now\n```"
+    })
     .setFooter(familyFooter());
 }
 
@@ -208,13 +224,16 @@ export async function buildFamilyPanelPayload(
   controllerId: string,
   section: FamilyPanelSection
 ) {
-  const profile = await getFamilyProfile(target.id);
+  const [profile, activeEffects] = await Promise.all([
+    getFamilyProfile(target.id),
+    getActiveRelationshipEffects(target.id)
+  ]);
   const embed =
     section === "partner"
       ? buildPartnerEmbed(target, profile)
       : section === "siblings"
         ? buildSiblingsEmbed(target, profile)
-        : buildOverviewEmbed(target, profile);
+        : buildOverviewEmbed(target, profile, activeEffects);
   return {
     embeds: [embed],
     components: familyButtons(section, target.id, controllerId)
@@ -280,7 +299,7 @@ export async function handleFamilyPanelButton(
             .setDescription("Only the command invoker can control this family panel.")
             .setFooter(familyFooter())
         ],
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
     } catch (error) {
       if (!isUnknownInteractionError(error)) throw error;
@@ -302,7 +321,7 @@ export async function handleFamilyPanelButton(
               .setDescription("Target user not found for this panel.")
               .setFooter(familyFooter())
           ],
-          ephemeral: true
+          flags: MessageFlags.Ephemeral
         });
       } catch (error) {
         if (!isUnknownInteractionError(error)) throw error;
@@ -328,7 +347,7 @@ export async function handleFamilyPanelButton(
             .setDescription(error instanceof Error ? error.message : "Could not update panel.")
             .setFooter(familyFooter())
         ],
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
     } catch (replyError) {
       if (!isUnknownInteractionError(replyError)) throw replyError;

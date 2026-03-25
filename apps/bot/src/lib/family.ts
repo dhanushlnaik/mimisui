@@ -1,15 +1,18 @@
 import { db } from "@cocosui/db";
+import { performance } from "node:perf_hooks";
 import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
   EmbedBuilder,
+  MessageFlags,
   type ButtonInteraction,
   type ChatInputCommandInteraction,
   type Client,
   type User
 } from "discord.js";
 import { logger } from "./logger.js";
+import { recordDbTiming } from "./perf-context.js";
 import { grantCommandProgress } from "./progression.js";
 
 const fdb = db as any;
@@ -34,6 +37,13 @@ const DATE_SCENARIOS = [
   "You both went stargazing and made future plans."
 ];
 const proposalTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
+const SETTINGS_CACHE_TTL_MS = 30_000;
+const PROFILE_CACHE_TTL_MS = 10_000;
+const LEADERBOARD_CACHE_TTL_MS = 15_000;
+const settingsCache = new Map<string, { value: any; expiresAt: number }>();
+const profileCache = new Map<string, { value: any; expiresAt: number }>();
+const coupleLeaderboardCache = new Map<number, { value: any; expiresAt: number }>();
+const familyLeaderboardCache = new Map<number, { value: any; expiresAt: number }>();
 
 function isUnknownInteractionError(error: unknown) {
   return Boolean(
@@ -50,6 +60,32 @@ function ensureSocialDelegates() {
       "Family DB client is outdated. Run `pnpm --filter @cocosui/db generate` and restart the bot with Node 22."
     );
   }
+}
+
+async function timedDb<T = any>(label: string, task: () => Promise<T>) {
+  const start = performance.now();
+  try {
+    return await task();
+  } finally {
+    const msRaw = performance.now() - start;
+    const ms = Math.round(msRaw);
+    recordDbTiming(`family:${label}`, msRaw);
+    if (ms >= 250) {
+      logger.warn(`Slow DB op: ${label} ${ms}ms`);
+    }
+  }
+}
+
+function invalidateFamilyProfileCache(...userIds: string[]) {
+  for (const id of userIds) {
+    if (!id) continue;
+    profileCache.delete(id);
+  }
+}
+
+function invalidateFamilyLeaderboardCache() {
+  coupleLeaderboardCache.clear();
+  familyLeaderboardCache.clear();
 }
 
 function pairOrder(a: string, b: string) {
@@ -89,11 +125,17 @@ async function ensureDiscordUser(user: User) {
   });
 }
 
-export async function getFamilySettings(guildId: string | null) {
+export async function getFamilySettings(guildId: string | null): Promise<any> {
   if (!guildId) return FAMILY_DEFAULTS;
-  const guild = await fdb.guild.findUnique({ where: { id: guildId } });
+  const cached = settingsCache.get(guildId);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.value;
+  }
+  const guild = await timedDb("guild.findUnique(getFamilySettings)", () =>
+    fdb.guild.findUnique({ where: { id: guildId } })
+  );
   const settings = (guild?.settings as Record<string, unknown> | null) ?? {};
-  return {
+  const resolved = {
     familyEnabled: (settings.familyEnabled as boolean | undefined) ?? FAMILY_DEFAULTS.familyEnabled,
     marriageEnabled: (settings.marriageEnabled as boolean | undefined) ?? FAMILY_DEFAULTS.marriageEnabled,
     siblingsEnabled: (settings.siblingsEnabled as boolean | undefined) ?? FAMILY_DEFAULTS.siblingsEnabled,
@@ -105,6 +147,8 @@ export async function getFamilySettings(guildId: string | null) {
         ? settings.relationshipRewardRate
         : FAMILY_DEFAULTS.relationshipRewardRate
   };
+  settingsCache.set(guildId, { value: resolved, expiresAt: Date.now() + SETTINGS_CACHE_TTL_MS });
+  return resolved;
 }
 
 async function activePartnerFor(userId: string) {
@@ -168,21 +212,21 @@ export async function createProposal(input: {
   await validateCreate(input.type, input.from.id, input.to.id);
 
   const now = Date.now();
-  const recent = await fdb.socialProposal.findFirst({
+  const recent = await timedDb("socialProposal.findFirst(createProposal.recent)", () => fdb.socialProposal.findFirst({
     where: {
       fromUserId: input.from.id,
       status: "PENDING",
       createdAt: { gt: new Date(now - PROPOSAL_COOLDOWN_MS) }
     }
-  });
+  }));
   if (recent) throw new Error("Slow down. Wait before sending another proposal.");
 
-  await fdb.socialProposal.updateMany({
+  await timedDb("socialProposal.updateMany(createProposal.expireOld)", () => fdb.socialProposal.updateMany({
     where: { status: "PENDING", expiresAt: { lt: new Date() } },
     data: { status: "ENDED" }
-  });
+  }));
 
-  const proposal = await fdb.socialProposal.create({
+  const proposal = await timedDb("socialProposal.create(createProposal)", () => fdb.socialProposal.create({
     data: {
       type: input.type,
       fromUserId: input.from.id,
@@ -191,7 +235,7 @@ export async function createProposal(input: {
       status: "PENDING",
       expiresAt: new Date(now + PROPOSAL_TTL_MS)
     }
-  });
+  }));
 
   return proposal;
 }
@@ -253,6 +297,8 @@ async function createRelationship(input: {
       });
     }
 
+    invalidateFamilyProfileCache(input.userAId, input.userBId);
+    invalidateFamilyLeaderboardCache();
     return relationship;
   }
 
@@ -277,6 +323,8 @@ async function createRelationship(input: {
     }
   });
 
+  invalidateFamilyProfileCache(input.userAId, input.userBId);
+  invalidateFamilyLeaderboardCache();
   return relationship;
 }
 
@@ -384,6 +432,8 @@ export async function respondProposal(input: {
       })
     ]);
   }
+  invalidateFamilyProfileCache(proposal.fromUserId, proposal.toUserId);
+  invalidateFamilyLeaderboardCache();
 
   return { accepted: true as const, proposal, relationship };
 }
@@ -397,6 +447,8 @@ export async function endPartnerRelationship(userId: string) {
     data: { status: "ENDED", endedAt: new Date() }
   });
   await addRelationshipEvent(rel.id, userId, "DIVORCED");
+  invalidateFamilyProfileCache(rel.userAId, rel.userBId);
+  invalidateFamilyLeaderboardCache();
   return rel;
 }
 
@@ -432,17 +484,43 @@ export async function awardDateInteraction(input: {
   const partnerId = relationship.userAId === input.userId ? relationship.userBId : relationship.userAId;
   const partnerUser = await fdb.discordUser.findUnique({ where: { id: partnerId } });
   const rate = (await getFamilySettings(input.guildId)).relationshipRewardRate;
+  const activeFamilyBoosters = await timedDb("booster.findMany(awardDateInteraction.family)", () =>
+    fdb.booster.findMany({
+      where: {
+        userId: input.userId,
+        expiresAt: { gt: now },
+        type: { in: ["family_double_date_once", "family_bond_bloom", "family_streak_shield_once"] }
+      },
+      orderBy: { createdAt: "asc" }
+    })
+  );
+  const doubleDateBooster = activeFamilyBoosters.find((b: any) => b.type === "family_double_date_once") ?? null;
+  const streakShieldBooster = activeFamilyBoosters.find((b: any) => b.type === "family_streak_shield_once") ?? null;
+  const bondBloomMultiplier = activeFamilyBoosters
+    .filter((b: any) => b.type === "family_bond_bloom")
+    .reduce((m: number, b: any) => m * Number(b.multiplier ?? 1), 1);
 
   const baseXp = Math.floor((40 + Math.random() * 31) * rate);
   const baseCoins = Math.floor((55 + Math.random() * 46) * rate);
-  const bondGain = Math.floor((30 + Math.random() * 21) * rate);
+  const bondGainRaw = Math.floor((30 + Math.random() * 21) * rate);
   const scoreGain = Math.floor((20 + Math.random() * 16) * rate);
   const rare = Math.random() < 0.12;
   const rareBonus = rare ? 35 : 0;
+  const doubled = Boolean(doubleDateBooster);
+  const xpGain = doubled ? baseXp * 2 : baseXp;
+  const coinGain = doubled ? baseCoins * 2 : baseCoins;
+  const bondGain = Math.max(1, Math.floor(bondGainRaw * (bondBloomMultiplier || 1)));
 
   const streakDelta = streakFromLastDate(progress.lastDateAt, now);
+  const shieldedReset = streakDelta.reset && Boolean(streakShieldBooster);
   const currentStreak =
-    streakDelta.next === 0 ? progress.currentStreak : streakDelta.reset ? 1 : progress.currentStreak + 1;
+    streakDelta.next === 0
+      ? progress.currentStreak
+      : shieldedReset
+        ? progress.currentStreak + 1
+        : streakDelta.reset
+          ? 1
+          : progress.currentStreak + 1;
   const bestStreak = Math.max(progress.bestStreak, currentStreak);
 
   const totalBondXp = progress.bondXp + bondGain + rareBonus;
@@ -457,7 +535,7 @@ export async function awardDateInteraction(input: {
       totalDates: { increment: 1 },
       currentStreak,
       bestStreak,
-      sharedCoins: { increment: baseCoins * 2 },
+      sharedCoins: { increment: coinGain * 2 },
       lastDateAt: now
     }
   });
@@ -465,9 +543,19 @@ export async function awardDateInteraction(input: {
   await addRelationshipEvent(relationship.id, input.userId, "DATE_COMPLETED", {
     bondGain,
     scoreGain,
-    coins: baseCoins,
+    coins: coinGain,
     rareBonus
   });
+  if (doubleDateBooster) {
+    await timedDb("booster.delete(awardDateInteraction.doubleDateConsume)", () =>
+      fdb.booster.delete({ where: { id: doubleDateBooster.id } })
+    );
+  }
+  if (streakShieldBooster && shieldedReset) {
+    await timedDb("booster.delete(awardDateInteraction.streakShieldConsume)", () =>
+      fdb.booster.delete({ where: { id: streakShieldBooster.id } })
+    );
+  }
 
   await Promise.all([
     grantCommandProgress({
@@ -484,19 +572,21 @@ export async function awardDateInteraction(input: {
     }),
     fdb.userProgress.update({
       where: { userId: input.userId },
-      data: { xp: { increment: baseXp }, coins: { increment: baseCoins } }
+      data: { xp: { increment: xpGain }, coins: { increment: coinGain } }
     }),
     fdb.userProgress.update({
       where: { userId: partnerId },
-      data: { xp: { increment: baseXp }, coins: { increment: baseCoins } }
+      data: { xp: { increment: xpGain }, coins: { increment: coinGain } }
     }),
     fdb.transaction.create({
-      data: { userId: input.userId, guildId: input.guildId, amount: baseCoins, reason: "family-date" }
+      data: { userId: input.userId, guildId: input.guildId, amount: coinGain, reason: "family-date" }
     }),
     fdb.transaction.create({
-      data: { userId: partnerId, guildId: input.guildId, amount: baseCoins, reason: "family-date" }
+      data: { userId: partnerId, guildId: input.guildId, amount: coinGain, reason: "family-date" }
     })
   ]);
+  invalidateFamilyProfileCache(input.userId, partnerId);
+  invalidateFamilyLeaderboardCache();
 
   return {
     relationshipId: relationship.id,
@@ -504,8 +594,8 @@ export async function awardDateInteraction(input: {
     partnerUsername: partnerUser?.username ?? "Unknown",
     scenario: DATE_SCENARIOS[Math.floor(Math.random() * DATE_SCENARIOS.length)] ?? DATE_SCENARIOS[0],
     rewards: {
-      xp: baseXp,
-      coins: baseCoins,
+      xp: xpGain,
+      coins: coinGain,
       bondXp: bondGain + rareBonus,
       bondScore: scoreGain + rareBonus
     },
@@ -519,8 +609,12 @@ export async function awardDateInteraction(input: {
   };
 }
 
-export async function getFamilyProfile(userId: string) {
+export async function getFamilyProfile(userId: string): Promise<any> {
   ensureSocialDelegates();
+  const cached = profileCache.get(userId);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.value;
+  }
   const [partner, siblings] = await Promise.all([
     activePartnerFor(userId),
     fdb.socialRelationship.findMany({
@@ -560,7 +654,7 @@ export async function getFamilyProfile(userId: string) {
       ? await fdb.discordUser.findUnique({ where: { id: partnerId } })
       : null;
 
-  return {
+  const resolved = {
     partner: partner
       ? {
           userId: partnerId,
@@ -580,10 +674,16 @@ export async function getFamilyProfile(userId: string) {
       (partner?.progress?.bondScore ?? 0) +
       siblingDetails.reduce((a: number, b: { bondScore: number }) => a + (b.bondScore ?? 0), 0)
   };
+  profileCache.set(userId, { value: resolved, expiresAt: Date.now() + PROFILE_CACHE_TTL_MS });
+  return resolved;
 }
 
-export async function getCoupleLeaderboard(limit = 10) {
+export async function getCoupleLeaderboard(limit = 10): Promise<any[]> {
   ensureSocialDelegates();
+  const cached = coupleLeaderboardCache.get(limit);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.value;
+  }
   const couples = await fdb.socialRelationship.findMany({
     where: { type: "PARTNER", status: "ACTIVE" },
     include: { progress: true }
@@ -593,7 +693,7 @@ export async function getCoupleLeaderboard(limit = 10) {
   const users = await fdb.discordUser.findMany({ where: { id: { in: userIds } } });
   const userMap = new Map(users.map((u: any) => [u.id, u.username]));
 
-  return couples
+  const resolved = couples
     .map((c: any) => ({
       relationshipId: c.id,
       userAId: c.userAId,
@@ -606,10 +706,16 @@ export async function getCoupleLeaderboard(limit = 10) {
     }))
     .sort((a: any, b: any) => b.bondScore - a.bondScore || b.totalDates - a.totalDates || b.streak - a.streak)
     .slice(0, limit);
+  coupleLeaderboardCache.set(limit, { value: resolved, expiresAt: Date.now() + LEADERBOARD_CACHE_TTL_MS });
+  return resolved;
 }
 
-export async function getTopFamilyLeaderboard(limit = 10) {
+export async function getTopFamilyLeaderboard(limit = 10): Promise<any[]> {
   ensureSocialDelegates();
+  const cached = familyLeaderboardCache.get(limit);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.value;
+  }
   const users = await fdb.discordUser.findMany({
     take: 200
   });
@@ -627,7 +733,9 @@ export async function getTopFamilyLeaderboard(limit = 10) {
     })
   );
 
-  return rows.sort((a, b) => b.totalBondScore - a.totalBondScore).slice(0, limit);
+  const resolved = rows.sort((a, b) => b.totalBondScore - a.totalBondScore).slice(0, limit);
+  familyLeaderboardCache.set(limit, { value: resolved, expiresAt: Date.now() + LEADERBOARD_CACHE_TTL_MS });
+  return resolved;
 }
 
 export async function addSibling(from: User, to: User, guildId: string | null) {
@@ -643,6 +751,8 @@ export async function addSibling(from: User, to: User, guildId: string | null) {
     guildId
   });
   await addRelationshipEvent(relationship.id, from.id, "ACCEPTED");
+  invalidateFamilyProfileCache(from.id, to.id);
+  invalidateFamilyLeaderboardCache();
   return relationship;
 }
 
@@ -654,6 +764,8 @@ export async function removeSibling(userId: string, targetId: string) {
     where: { id: rel.id },
     data: { status: "ENDED", endedAt: new Date() }
   });
+  invalidateFamilyProfileCache(userId, targetId);
+  invalidateFamilyLeaderboardCache();
   return rel;
 }
 
@@ -673,6 +785,385 @@ export async function getBondStatus(userId: string, targetId: string) {
     bondScore: rel.progress?.bondScore ?? 0,
     streak: rel.progress?.currentStreak ?? 0,
     totalDates: rel.progress?.totalDates ?? 0
+  };
+}
+
+type FamilyQuest = {
+  key: string;
+  type: "daily" | "weekly";
+  periodKey: string;
+  title: string;
+  progress: number;
+  target: number;
+  rewardXp: number;
+  rewardCoins: number;
+  rewardBondXp: number;
+  completed: boolean;
+  claimed: boolean;
+};
+
+function periodStarts(now = new Date()) {
+  const dayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const weekStart = new Date(dayStart);
+  const day = weekStart.getUTCDay();
+  const back = day === 0 ? 6 : day - 1;
+  weekStart.setUTCDate(weekStart.getUTCDate() - back);
+  return { dayStart, weekStart };
+}
+
+export async function getFamilyQuestBoard(userId: string, guildId: string | null): Promise<{
+  partner: FamilyQuest[];
+  sibling: FamilyQuest[];
+  hasPartner: boolean;
+  hasSiblings: boolean;
+}> {
+  ensureSocialDelegates();
+  const now = new Date();
+  const { dayStart, weekStart } = periodStarts(now);
+  const dayPeriodKey = dayKey(now);
+  const weekPeriodKey = (() => {
+    const d = new Date(weekStart);
+    const y = d.getUTCFullYear();
+    const jan1 = new Date(Date.UTC(y, 0, 1));
+    const weekNo = Math.ceil((((d.getTime() - jan1.getTime()) / 86400000) + 1) / 7);
+    return `${y}-W${String(weekNo).padStart(2, "0")}`;
+  })();
+
+  const [partner, siblingCountAll, acceptedSiblingToday, acceptedSiblingWeek, acceptedPartnerWeek, familyActionDay, familyActionWeek] =
+    await Promise.all([
+      activePartnerFor(userId),
+      timedDb("socialRelationship.count(getFamilyQuestBoard.siblings)", () =>
+        fdb.socialRelationship.count({
+          where: {
+            type: "SIBLING",
+            status: "ACTIVE",
+            OR: [{ userAId: userId }, { userBId: userId }]
+          }
+        })
+      ),
+      timedDb("socialRelationshipEvent.count(getFamilyQuestBoard.siblingToday)", () =>
+        fdb.socialRelationshipEvent.count({
+          where: {
+            actorUserId: userId,
+            eventType: "ACCEPTED",
+            createdAt: { gte: dayStart },
+            relationship: { type: "SIBLING" }
+          }
+        })
+      ),
+      timedDb("socialRelationshipEvent.count(getFamilyQuestBoard.siblingWeek)", () =>
+        fdb.socialRelationshipEvent.count({
+          where: {
+            actorUserId: userId,
+            eventType: "ACCEPTED",
+            createdAt: { gte: weekStart },
+            relationship: { type: "SIBLING" }
+          }
+        })
+      ),
+      timedDb("socialRelationshipEvent.count(getFamilyQuestBoard.partnerWeek)", () =>
+        fdb.socialRelationshipEvent.count({
+          where: {
+            actorUserId: userId,
+            eventType: "ACCEPTED",
+            createdAt: { gte: weekStart },
+            relationship: { type: "PARTNER" }
+          }
+        })
+      ),
+      timedDb("socialRelationshipEvent.count(getFamilyQuestBoard.actionsDay)", () =>
+        fdb.socialRelationshipEvent.count({
+          where: {
+            actorUserId: userId,
+            eventType: { in: ["DATE_COMPLETED", "ACCEPTED"] },
+            createdAt: { gte: dayStart }
+          }
+        })
+      ),
+      timedDb("socialRelationshipEvent.count(getFamilyQuestBoard.actionsWeek)", () =>
+        fdb.socialRelationshipEvent.count({
+          where: {
+            actorUserId: userId,
+            eventType: { in: ["DATE_COMPLETED", "ACCEPTED"] },
+            createdAt: { gte: weekStart }
+          }
+        })
+      )
+    ]);
+
+  let partnerDatesDay = 0;
+  let partnerDatesWeek = 0;
+  const claims = await timedDb("familyQuestClaim.findMany(getFamilyQuestBoard)", () =>
+    fdb.familyQuestClaim.findMany({
+      where: {
+        userId,
+        guildId,
+        OR: [{ periodKey: dayPeriodKey }, { periodKey: weekPeriodKey }]
+      }
+    })
+  );
+  const claimSet = new Set<string>(claims.map((c: any) => `${c.questKey}:${c.periodKey}`));
+  if (partner) {
+    const counts = await Promise.all([
+      timedDb("socialRelationshipEvent.count(getFamilyQuestBoard.partnerDateDay)", () =>
+        fdb.socialRelationshipEvent.count({
+          where: {
+            relationshipId: partner.id,
+            actorUserId: userId,
+            eventType: "DATE_COMPLETED",
+            createdAt: { gte: dayStart }
+          }
+        })
+      ),
+      timedDb("socialRelationshipEvent.count(getFamilyQuestBoard.partnerDateWeek)", () =>
+        fdb.socialRelationshipEvent.count({
+          where: {
+            relationshipId: partner.id,
+            actorUserId: userId,
+            eventType: "DATE_COMPLETED",
+            createdAt: { gte: weekStart }
+          }
+        })
+      )
+    ]);
+    partnerDatesDay = counts[0];
+    partnerDatesWeek = counts[1];
+  }
+
+  const partnerQuests: FamilyQuest[] = [
+    {
+      key: "date_daily_1",
+      type: "daily",
+      periodKey: dayPeriodKey,
+      title: "Go on 1 date with your partner",
+      progress: partnerDatesDay,
+      target: 1,
+      rewardXp: 90,
+      rewardCoins: 70,
+      rewardBondXp: 40,
+      completed: partnerDatesDay >= 1,
+      claimed: claimSet.has(`date_daily_1:${dayPeriodKey}`)
+    },
+    {
+      key: "date_daily_3",
+      type: "daily",
+      periodKey: dayPeriodKey,
+      title: "Go on 3 dates with your partner",
+      progress: partnerDatesDay,
+      target: 3,
+      rewardXp: 180,
+      rewardCoins: 130,
+      rewardBondXp: 90,
+      completed: partnerDatesDay >= 3,
+      claimed: claimSet.has(`date_daily_3:${dayPeriodKey}`)
+    },
+    {
+      key: "date_weekly_8",
+      type: "weekly",
+      periodKey: weekPeriodKey,
+      title: "Go on 8 dates this week",
+      progress: partnerDatesWeek,
+      target: 8,
+      rewardXp: 260,
+      rewardCoins: 220,
+      rewardBondXp: 140,
+      completed: partnerDatesWeek >= 8,
+      claimed: claimSet.has(`date_weekly_8:${weekPeriodKey}`)
+    },
+    {
+      key: "partner_accept_weekly_1",
+      type: "weekly",
+      periodKey: weekPeriodKey,
+      title: "Start 1 new partner bond this week",
+      progress: acceptedPartnerWeek,
+      target: 1,
+      rewardXp: 140,
+      rewardCoins: 120,
+      rewardBondXp: 80,
+      completed: acceptedPartnerWeek >= 1,
+      claimed: claimSet.has(`partner_accept_weekly_1:${weekPeriodKey}`)
+    }
+  ];
+
+  const siblingQuests: FamilyQuest[] = [
+    {
+      key: "sibling_daily_1",
+      type: "daily",
+      periodKey: dayPeriodKey,
+      title: "Make or accept 1 sibling bond today",
+      progress: acceptedSiblingToday,
+      target: 1,
+      rewardXp: 70,
+      rewardCoins: 60,
+      rewardBondXp: 35,
+      completed: acceptedSiblingToday >= 1,
+      claimed: claimSet.has(`sibling_daily_1:${dayPeriodKey}`)
+    },
+    {
+      key: "sibling_weekly_3",
+      type: "weekly",
+      periodKey: weekPeriodKey,
+      title: "Make or accept 3 sibling bonds this week",
+      progress: acceptedSiblingWeek,
+      target: 3,
+      rewardXp: 180,
+      rewardCoins: 140,
+      rewardBondXp: 90,
+      completed: acceptedSiblingWeek >= 3,
+      claimed: claimSet.has(`sibling_weekly_3:${weekPeriodKey}`)
+    },
+    {
+      key: "actions_daily_3",
+      type: "daily",
+      periodKey: dayPeriodKey,
+      title: "Complete 3 family interactions today",
+      progress: familyActionDay,
+      target: 3,
+      rewardXp: 100,
+      rewardCoins: 85,
+      rewardBondXp: 45,
+      completed: familyActionDay >= 3,
+      claimed: claimSet.has(`actions_daily_3:${dayPeriodKey}`)
+    },
+    {
+      key: "actions_weekly_12",
+      type: "weekly",
+      periodKey: weekPeriodKey,
+      title: "Complete 12 family interactions this week",
+      progress: familyActionWeek,
+      target: 12,
+      rewardXp: 240,
+      rewardCoins: 200,
+      rewardBondXp: 120,
+      completed: familyActionWeek >= 12,
+      claimed: claimSet.has(`actions_weekly_12:${weekPeriodKey}`)
+    }
+  ];
+
+  return {
+    partner: partnerQuests,
+    sibling: siblingQuests,
+    hasPartner: Boolean(partner),
+    hasSiblings: siblingCountAll > 0
+  };
+}
+
+export function buildFamilyQuestClaimComponents(controllerId: string) {
+  return [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`family:questclaim:${controllerId}:daily`)
+        .setLabel("Claim Daily")
+        .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId(`family:questclaim:${controllerId}:weekly`)
+        .setLabel("Claim Weekly")
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId(`family:questclaim:${controllerId}:all`)
+        .setLabel("Claim All")
+        .setStyle(ButtonStyle.Secondary)
+    )
+  ];
+}
+
+export async function claimFamilyQuestRewards(input: {
+  userId: string;
+  guildId: string | null;
+  filter: "daily" | "weekly" | "all";
+}) {
+  ensureSocialDelegates();
+  const board = await getFamilyQuestBoard(input.userId, input.guildId);
+  const all = [...board.partner, ...board.sibling];
+  const claimable = all.filter(
+    (q) => q.completed && !q.claimed && (input.filter === "all" || q.type === input.filter)
+  );
+  if (claimable.length === 0) {
+    return { claimed: [] as FamilyQuest[], totals: { xp: 0, coins: 0, bondXp: 0 } };
+  }
+
+  let totalXp = 0;
+  let totalCoins = 0;
+  let totalBondXp = 0;
+  const accepted: FamilyQuest[] = [];
+  for (const q of claimable) {
+    try {
+      await timedDb("familyQuestClaim.create(claimFamilyQuestRewards)", () =>
+        fdb.familyQuestClaim.create({
+          data: {
+            userId: input.userId,
+            guildId: input.guildId,
+            questKey: q.key,
+            periodKey: q.periodKey,
+            questType: q.type,
+            rewardXP: q.rewardXp,
+            rewardCoins: q.rewardCoins,
+            rewardBondXp: q.rewardBondXp
+          }
+        })
+      );
+      accepted.push(q);
+      totalXp += q.rewardXp;
+      totalCoins += q.rewardCoins;
+      totalBondXp += q.rewardBondXp;
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : "";
+      if (!/unique|duplicate|constraint/i.test(msg)) throw error;
+    }
+  }
+
+  if (accepted.length === 0) {
+    return { claimed: [] as FamilyQuest[], totals: { xp: 0, coins: 0, bondXp: 0 } };
+  }
+
+  await timedDb("userProgress.upsert(claimFamilyQuestRewards)", () =>
+    fdb.userProgress.upsert({
+      where: { userId: input.userId },
+      update: {
+        guildId: input.guildId,
+        xp: { increment: totalXp },
+        coins: { increment: totalCoins }
+      },
+      create: {
+        userId: input.userId,
+        guildId: input.guildId,
+        xp: totalXp,
+        coins: totalCoins,
+        level: 1,
+        title: "Rookie"
+      }
+    })
+  );
+  await timedDb("transaction.create(claimFamilyQuestRewards)", () =>
+    fdb.transaction.create({
+      data: {
+        userId: input.userId,
+        guildId: input.guildId,
+        amount: totalCoins,
+        reason: "family-quest"
+      }
+    })
+  );
+
+  const partner = await activePartnerFor(input.userId);
+  if (partner && partner.progress && totalBondXp > 0) {
+    const next = computeBondLevel(partner.progress.bondXp + totalBondXp);
+    await timedDb("socialRelationshipProgress.update(claimFamilyQuestRewards.partnerBond)", () =>
+      fdb.socialRelationshipProgress.update({
+        where: { relationshipId: partner.id },
+        data: {
+          bondXp: partner.progress.bondXp + totalBondXp,
+          bondLevel: next.level,
+          bondScore: { increment: Math.floor(totalBondXp / 2) }
+        }
+      })
+    );
+    invalidateFamilyProfileCache(input.userId, partner.userAId, partner.userBId);
+  }
+
+  return {
+    claimed: accepted,
+    totals: { xp: totalXp, coins: totalCoins, bondXp: totalBondXp }
   };
 }
 
@@ -868,7 +1359,7 @@ export async function handleFamilyProposalButton(interaction: ButtonInteraction)
             .setTimestamp(new Date())
             .setFooter({ text: "Team Tatsui ❤️" })
         ],
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       } as const;
 
       if (isExpiry && interaction.isButton()) {
@@ -881,7 +1372,92 @@ export async function handleFamilyProposalButton(interaction: ButtonInteraction)
       }
     } catch (replyError) {
       if (!isUnknownInteractionError(replyError)) throw replyError;
-      logger.warn("Ignored stale proposal failure reply (10062).");
+      logger.info("Ignored stale proposal failure reply (10062).");
+    }
+    return true;
+  }
+}
+
+export async function handleFamilyQuestButton(interaction: ButtonInteraction) {
+  const [prefix, kind, controllerId, filterRaw] = interaction.customId.split(":");
+  if (prefix !== "family" || kind !== "questclaim" || !controllerId || !filterRaw) return false;
+  if (interaction.user.id !== controllerId) {
+    try {
+      await interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0xf72585)
+            .setDescription("Only the command invoker can claim these family quests.")
+            .setFooter({ text: "Team Tatsui ❤️" })
+        ],
+        flags: MessageFlags.Ephemeral
+      });
+    } catch (error) {
+      if (!isUnknownInteractionError(error)) throw error;
+    }
+    return true;
+  }
+
+  const filter = filterRaw === "daily" || filterRaw === "weekly" || filterRaw === "all" ? filterRaw : "all";
+  try {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const result = await claimFamilyQuestRewards({
+      userId: interaction.user.id,
+      guildId: interaction.guildId,
+      filter
+    });
+    if (result.claimed.length === 0) {
+      await interaction.editReply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0xf72585)
+            .setDescription("No completed unclaimed family quests for this filter.")
+            .setFooter({ text: "Team Tatsui ❤️" })
+        ]
+      });
+      return true;
+    }
+    await interaction.editReply({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0x15ff00)
+          .setTitle("Quest Rewards Claimed!")
+          .setDescription(
+            [
+              `Claimed: **${result.claimed.length}** quest(s)`,
+              `+${result.totals.xp} XP • +${result.totals.coins} coins • +${result.totals.bondXp} bond XP`,
+              "",
+              result.claimed.map((q) => `• ${q.title}`).join("\n")
+            ].join("\n")
+          )
+          .setFooter({ text: "Team Tatsui ❤️" })
+      ]
+    });
+    return true;
+  } catch (error) {
+    try {
+      if (interaction.deferred || interaction.replied) {
+        await interaction.editReply({
+          embeds: [
+            new EmbedBuilder()
+              .setColor(0xf72585)
+              .setDescription(error instanceof Error ? error.message : "Could not claim family quests.")
+              .setFooter({ text: "Team Tatsui ❤️" })
+          ]
+        });
+      } else {
+        await interaction.reply({
+          embeds: [
+            new EmbedBuilder()
+              .setColor(0xf72585)
+              .setDescription(error instanceof Error ? error.message : "Could not claim family quests.")
+              .setFooter({ text: "Team Tatsui ❤️" })
+          ],
+          flags: MessageFlags.Ephemeral
+        });
+      }
+    } catch (replyError) {
+      if (!isUnknownInteractionError(replyError)) throw replyError;
     }
     return true;
   }

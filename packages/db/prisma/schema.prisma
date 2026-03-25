@@ -86,6 +86,8 @@ model DiscordUser {
   boosters       Booster[]
   quests         UserQuest[]
   transactions   Transaction[]
+  familyQuestClaims FamilyQuestClaim[]
+  relationshipItems RelationshipInventory[]
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
 }
@@ -286,6 +288,38 @@ model SocialProposal {
   @@index([toUserId, status])
   @@index([fromUserId, status])
   @@index([expiresAt])
+}
+
+model FamilyQuestClaim {
+  id         String   @id @default(cuid())
+  userId     String
+  guildId    String?
+  questKey   String
+  periodKey  String
+  questType  String
+  rewardXP   Int
+  rewardCoins Int
+  rewardBondXp Int @default(0)
+  createdAt  DateTime @default(now())
+
+  user DiscordUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, guildId, questKey, periodKey])
+  @@index([userId, periodKey])
+}
+
+model RelationshipInventory {
+  id        String   @id @default(cuid())
+  userId    String
+  itemCode  String
+  quantity  Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user DiscordUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, itemCode])
+  @@index([userId])
 }
 
 enum RelationshipType {

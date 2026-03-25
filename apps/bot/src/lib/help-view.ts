@@ -3,6 +3,7 @@ import {
   ButtonBuilder,
   ButtonStyle,
   EmbedBuilder,
+  MessageFlags,
   StringSelectMenuBuilder,
   type ButtonInteraction,
   type StringSelectMenuInteraction
@@ -258,7 +259,7 @@ export async function handleHelpSelect(interaction: StringSelectMenuInteraction)
   if (interaction.user.id !== ownerId) {
     await interaction.reply({
       content: "This help panel belongs to another user. Run `/help` to open yours.",
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
     return true;
   }
@@ -277,7 +278,7 @@ export async function handleHelpButton(interaction: ButtonInteraction) {
   if (interaction.user.id !== ownerId) {
     await interaction.reply({
       content: "This help panel belongs to another user. Run `/help` to open yours.",
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
     return true;
   }

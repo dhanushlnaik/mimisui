@@ -1,4 +1,4 @@
-import { EmbedBuilder, SlashCommandBuilder } from "discord.js";
+import { EmbedBuilder, MessageFlags, SlashCommandBuilder } from "discord.js";
 import type { SlashCommand } from "../types/command.js";
 import {
   awardDateInteraction,
@@ -12,6 +12,8 @@ import {
   getCoupleLeaderboard,
   getFamilyProfile,
   getFamilySettings,
+  getFamilyQuestBoard,
+  buildFamilyQuestClaimComponents,
   scheduleProposalTimeout,
   getTopFamilyLeaderboard,
   removeSibling
@@ -59,7 +61,7 @@ const marryCommand: SlashCommand = {
             .setTimestamp(new Date())
             .setFooter({ text: "Team Tatsui ❤️" })
         ],
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return;
     }
@@ -71,7 +73,7 @@ const marryCommand: SlashCommand = {
             .setDescription("BRUH!! You can't make a bot your partner!!")
             .setFooter({ text: "Team Tatsui ❤️" })
         ],
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return;
     }
@@ -94,7 +96,7 @@ const marryCommand: SlashCommand = {
             .setTimestamp(new Date())
             .setFooter({ text: "Team Tatsui ❤️" })
         ],
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return;
     }
@@ -107,17 +109,18 @@ const marryCommand: SlashCommand = {
             .setTimestamp(new Date())
             .setFooter({ text: "Team Tatsui ❤️" })
         ],
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return;
     }
+    await interaction.deferReply();
     const proposal = await createProposal({
       type: "PARTNER",
       from: interaction.user,
       to: target,
       guildId: interaction.guildId
     });
-    const sent = await interaction.reply({
+    await interaction.editReply({
       content: `${target}, you have a new proposal.`,
       ...buildProposalMessage({
         proposalId: proposal.id,
@@ -125,9 +128,9 @@ const marryCommand: SlashCommand = {
         from: interaction.user,
         to: target,
         expiresAt: proposal.expiresAt
-      }),
-      fetchReply: true
+      })
     });
+    const sent = await interaction.fetchReply();
     if (interaction.channelId) {
       scheduleProposalTimeout({
         client: interaction.client,
@@ -173,12 +176,13 @@ const partnerCommand: SlashCommand = {
   async execute(interaction) {
     const settings = await getFamilySettings(interaction.guildId);
     ensureFamilyEnabledOrThrow(settings);
+    await interaction.deferReply();
     const payload = await buildFamilyPanelPayload(
       interaction.user,
       interaction.user.id,
       "partner"
     );
-    await interaction.reply(payload);
+    await interaction.editReply(payload);
   }
 };
 
@@ -188,6 +192,7 @@ const dateCommand: SlashCommand = {
     const settings = await getFamilySettings(interaction.guildId);
     ensureFamilyEnabledOrThrow(settings);
     ensureMarriageEnabledOrThrow(settings);
+    await interaction.deferReply();
     const result = await awardDateInteraction({
       userId: interaction.user.id,
       guildId: interaction.guildId,
@@ -196,7 +201,7 @@ const dateCommand: SlashCommand = {
     const profile = await getFamilyProfile(interaction.user.id);
     const totalDates = profile.partner?.totalDates ?? 0;
     const uwuScore = profile.partner?.bondScore ?? result.rewards.bondScore;
-    await interaction.reply({
+    await interaction.editReply({
       embeds: [
         new EmbedBuilder()
           .setColor(0xf72585)
@@ -233,7 +238,7 @@ const anniversaryCommand: SlashCommand = {
             .setDescription(`${interaction.user.username}, you are not married! Please Marry Someone First! \n Usage : \`/marry @user\``)
             .setFooter({ text: "Team Tatsui ❤️" })
         ],
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return;
     }
@@ -264,13 +269,14 @@ const familyProfileCommand: SlashCommand = {
   async execute(interaction) {
     const settings = await getFamilySettings(interaction.guildId);
     ensureFamilyEnabledOrThrow(settings);
+    await interaction.deferReply();
     const target = interaction.options.getUser("user") ?? interaction.user;
     const payload = await buildFamilyPanelPayload(
       target,
       interaction.user.id,
       "overview"
     );
-    await interaction.reply(payload);
+    await interaction.editReply(payload);
   }
 };
 
@@ -279,12 +285,13 @@ const siblingsCommand: SlashCommand = {
   async execute(interaction) {
     const settings = await getFamilySettings(interaction.guildId);
     ensureFamilyEnabledOrThrow(settings);
+    await interaction.deferReply();
     const payload = await buildFamilyPanelPayload(
       interaction.user,
       interaction.user.id,
       "siblings"
     );
-    await interaction.reply(payload);
+    await interaction.editReply(payload);
   }
 };
 
@@ -297,6 +304,7 @@ const siblingAddCommand: SlashCommand = {
     const settings = await getFamilySettings(interaction.guildId);
     ensureFamilyEnabledOrThrow(settings);
     ensureSiblingsEnabledOrThrow(settings);
+    await interaction.deferReply();
     const target = interaction.options.getUser("user", true);
     const proposal = await createProposal({
       type: "SIBLING",
@@ -304,7 +312,7 @@ const siblingAddCommand: SlashCommand = {
       to: target,
       guildId: interaction.guildId
     });
-    const sent = await interaction.reply({
+    await interaction.editReply({
       content: `${target}, you got a sibling request.`,
       ...buildProposalMessage({
         proposalId: proposal.id,
@@ -312,9 +320,9 @@ const siblingAddCommand: SlashCommand = {
         from: interaction.user,
         to: target,
         expiresAt: proposal.expiresAt
-      }),
-      fetchReply: true
+      })
     });
+    const sent = await interaction.fetchReply();
     if (interaction.channelId) {
       scheduleProposalTimeout({
         client: interaction.client,
@@ -336,9 +344,10 @@ const siblingRemoveCommand: SlashCommand = {
     const settings = await getFamilySettings(interaction.guildId);
     ensureFamilyEnabledOrThrow(settings);
     ensureSiblingsEnabledOrThrow(settings);
+    await interaction.deferReply();
     const target = interaction.options.getUser("user", true);
     await removeSibling(interaction.user.id, target.id);
-    await interaction.reply({
+    await interaction.editReply({
       embeds: [
         new EmbedBuilder()
           .setColor(0xf72585)
@@ -354,8 +363,9 @@ const coupleLeaderboardCommand: SlashCommand = {
   async execute(interaction) {
     const settings = await getFamilySettings(interaction.guildId);
     ensureFamilyEnabledOrThrow(settings);
+    await interaction.deferReply();
     const rows = await getCoupleLeaderboard(10);
-    await interaction.reply({
+    await interaction.editReply({
       embeds: [buildCoupleLeaderboardEmbed(rows)]
     });
   }
@@ -366,8 +376,9 @@ const familyLeaderboardCommand: SlashCommand = {
   async execute(interaction) {
     const settings = await getFamilySettings(interaction.guildId);
     ensureFamilyEnabledOrThrow(settings);
+    await interaction.deferReply();
     const rows = await getTopFamilyLeaderboard(10);
-    await interaction.reply({
+    await interaction.editReply({
       embeds: [buildFamilyLeaderboardEmbed(rows)]
     });
   }
@@ -391,7 +402,7 @@ const bondStatusCommand: SlashCommand = {
             .setDescription(`You have no active relationship with ${target}.`)
             .setFooter({ text: "Team Tatsui ❤️" })
         ],
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return;
     }
@@ -422,6 +433,51 @@ const bondStatusCommand: SlashCommand = {
   }
 };
 
+const familyQuestsCommand: SlashCommand = {
+  data: new SlashCommandBuilder().setName("familyquests").setDescription("View your family relationship quests."),
+  async execute(interaction) {
+    const settings = await getFamilySettings(interaction.guildId);
+    ensureFamilyEnabledOrThrow(settings);
+    await interaction.deferReply();
+
+    const board = await getFamilyQuestBoard(interaction.user.id, interaction.guildId);
+    const fmt = (quests: Array<{ title: string; progress: number; target: number; rewardXp: number; rewardCoins: number; rewardBondXp: number; completed: boolean; claimed: boolean }>) =>
+      quests
+        .map((q, i) =>
+          [
+            `${i + 1}. ${q.claimed ? "🏆" : q.completed ? "✅" : "▫️"} ${q.title}`,
+            `▸ Reward: \`${q.rewardXp} XP\` • \`${q.rewardCoins} coins\` • \`${q.rewardBondXp} bond XP\``,
+            `▸ Progress: \`[${Math.min(q.progress, q.target)}/${q.target}]\` ${q.claimed ? "• `CLAIMED`" : ""}`
+          ].join("\n")
+        )
+        .join("\n\n");
+
+    await interaction.editReply({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0xf72585)
+          .setAuthor({
+            name: `${interaction.user.displayName}'s Family Quest Log`,
+            iconURL: interaction.user.displayAvatarURL()
+          })
+          .setDescription(
+            [
+              `These quests belong to ${interaction.user}.`,
+              board.hasPartner ? "💍 Partner bond detected." : "💤 No active partner right now.",
+              board.hasSiblings ? "🧬 Sibling bond detected." : "🫧 No active siblings right now."
+            ].join("\n")
+          )
+          .addFields(
+            { name: "🗓 Partner Quests", value: fmt(board.partner) },
+            { name: "📆 Sibling & Family Quests", value: fmt(board.sibling) }
+          )
+          .setFooter({ text: "Progress updates automatically when you use family commands." })
+      ],
+      components: buildFamilyQuestClaimComponents(interaction.user.id)
+    });
+  }
+};
+
 export const familyCommands: SlashCommand[] = [
   marryCommand,
   divorceCommand,
@@ -434,5 +490,6 @@ export const familyCommands: SlashCommand[] = [
   siblingRemoveCommand,
   coupleLeaderboardCommand,
   familyLeaderboardCommand,
-  bondStatusCommand
+  bondStatusCommand,
+  familyQuestsCommand
 ];
