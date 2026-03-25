@@ -5,6 +5,7 @@ import { env } from "./env.js";
 import { registerMessageCreate } from "./events/message-create.js";
 import {
   handleFamilyAchievementButton,
+  handleFamilySimulationAdminPanelButton,
   handleFamilySimulationPanelButton,
   handleFamilyProposalButton,
   handleFamilyQuestButton
@@ -143,6 +144,8 @@ client.on("interactionCreate", async (interaction) => {
     if (handledFamilyAchievement) return;
     const handledFamilySimulationPanel = await handleFamilySimulationPanelButton(interaction);
     if (handledFamilySimulationPanel) return;
+    const handledFamilySimulationAdminPanel = await handleFamilySimulationAdminPanelButton(interaction);
+    if (handledFamilySimulationAdminPanel) return;
     const handledFamilyPanel = await handleFamilyPanelButton(interaction, client);
     if (handledFamilyPanel) return;
     const handled = await handleHelpButton(interaction);

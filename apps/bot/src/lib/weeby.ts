@@ -93,6 +93,24 @@ export async function callWeebyCustom(
   };
 }
 
+export async function callWeebyGif(type: string, noanime?: boolean): Promise<string> {
+  const token = requireWeebyToken();
+  const url = new URL(`/gif/${type}`, WEEBY_API_BASE);
+  url.searchParams.set("token", token);
+  if (typeof noanime === "boolean") {
+    url.searchParams.set("noanime", String(noanime));
+  }
+  const response = await fetch(url.toString());
+  if (!response.ok) {
+    throw new Error(`Weeby gif failed (${response.status}) for ${type}.`);
+  }
+  const data = (await response.json()) as { url?: string };
+  if (!data.url) {
+    throw new Error(`Weeby gif returned empty URL for ${type}.`);
+  }
+  return data.url;
+}
+
 export function weebyAttachment(
   generator: string,
   result: GeneratorResult,

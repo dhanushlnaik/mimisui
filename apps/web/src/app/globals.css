@@ -1,13 +1,13 @@
 @import "tailwindcss";
 
 @theme {
-  --color-background: hsl(35 45% 96%);
-  --color-foreground: hsl(28 30% 12%);
-  --color-muted: hsl(34 20% 90%);
+  --color-background: hsl(28 44% 96%);
+  --color-foreground: hsl(26 28% 12%);
+  --color-muted: hsl(31 24% 90%);
   --color-muted-foreground: hsl(24 12% 36%);
-  --color-card: hsl(42 26% 98%);
-  --color-border: hsl(28 20% 80%);
-  --color-primary: hsl(14 88% 46%);
+  --color-card: hsl(40 26% 98%);
+  --color-border: hsl(24 21% 80%);
+  --color-primary: hsl(16 86% 44%);
 
   --font-body: "Space Grotesk", sans-serif;
   --font-title: "Libre Baskerville", serif;
@@ -16,8 +16,9 @@
 body {
   @apply bg-background font-body text-foreground;
   background-image:
-    radial-gradient(circle at 20% 20%, hsl(14 88% 46% / 0.08), transparent 40%),
-    radial-gradient(circle at 80% 0%, hsl(200 80% 40% / 0.07), transparent 35%);
+    radial-gradient(circle at 15% 20%, hsl(16 86% 44% / 0.14), transparent 40%),
+    radial-gradient(circle at 85% 0%, hsl(198 74% 38% / 0.12), transparent 35%),
+    radial-gradient(circle at 50% 100%, hsl(47 82% 45% / 0.09), transparent 40%);
   min-height: 100vh;
 }
 
@@ -31,8 +32,43 @@ body {
 
 .persona-title {
   @apply font-title;
-  background-image: linear-gradient(110deg, hsl(14 88% 38%), hsl(200 70% 35%));
+  background-image: linear-gradient(110deg, hsl(16 86% 34%), hsl(198 70% 30%));
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
+}
+
+.mesh-layer {
+  position: relative;
+  overflow: hidden;
+}
+
+.mesh-layer::before {
+  content: "";
+  position: absolute;
+  inset: -20% -10% auto -10%;
+  height: 80%;
+  background:
+    radial-gradient(circle at 10% 30%, hsl(14 86% 55% / 0.14), transparent 45%),
+    radial-gradient(circle at 90% 20%, hsl(194 72% 45% / 0.14), transparent 42%),
+    radial-gradient(circle at 50% 80%, hsl(40 95% 55% / 0.1), transparent 40%);
+  pointer-events: none;
+}
+
+.glass-card {
+  @apply rounded-2xl border border-border/80 bg-card/70 backdrop-blur-sm;
+  box-shadow:
+    0 10px 30px hsl(20 20% 20% / 0.08),
+    inset 0 1px 0 hsl(0 0% 100% / 0.65);
+}
+
+.dash-grid {
+  background-image:
+    linear-gradient(to right, hsl(24 20% 72% / 0.2) 1px, transparent 1px),
+    linear-gradient(to bottom, hsl(24 20% 72% / 0.2) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+
+.pill {
+  @apply inline-flex items-center gap-2 rounded-full border border-border/80 bg-card px-3 py-1 text-xs font-semibold tracking-wide text-muted-foreground;
 }

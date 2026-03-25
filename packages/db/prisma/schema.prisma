@@ -89,6 +89,7 @@ model DiscordUser {
   familyQuestClaims FamilyQuestClaim[]
   relationshipItems RelationshipInventory[]
   familyAchievementClaims FamilyAchievementClaim[]
+  familySeasonClaims FamilySeasonClaim[]
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
 }
@@ -260,6 +261,7 @@ model SocialRelationshipProgress {
   simSeasonPoints      Int      @default(0)
   simSeasonTier        String   @default("UNRANKED")
   simSeasonRewardMask  Int      @default(0)
+  simDuelLockedUntil   DateTime?
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
@@ -347,6 +349,62 @@ model FamilyAchievementClaim {
   @@index([userId, createdAt])
 }
 
+model FamilySeasonClaim {
+  id             String   @id @default(cuid())
+  userId         String
+  guildId        String?
+  seasonKey      String
+  relationshipId String
+  tier           String
+  rank           Int?
+  rewardXP       Int
+  rewardCoins    Int
+  rewardBondXp   Int @default(0)
+  claimedAt      DateTime @default(now())
+
+  user DiscordUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, seasonKey, relationshipId])
+  @@index([seasonKey, claimedAt])
+  @@index([userId, claimedAt])
+}
+
+model FamilyPenaltyFlag {
+  id             String   @id @default(cuid())
+  guildId        String?
+  relationshipId String?
+  userId         String?
+  flagType       String
+  reason         String
+  penaltyScore   Int      @default(1)
+  active         Boolean  @default(true)
+  metadata       Json?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  resolvedAt     DateTime?
+
+  @@index([active, createdAt])
+  @@index([flagType, createdAt])
+  @@index([relationshipId, createdAt])
+  @@index([userId, createdAt])
+}
+
+model FamilyModerationLog {
+  id             String   @id @default(cuid())
+  guildId        String?
+  relationshipId String?
+  userId         String?
+  action         String
+  severity       String   @default("INFO")
+  details        Json?
+  createdAt      DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([severity, createdAt])
+  @@index([relationshipId, createdAt])
+  @@index([userId, createdAt])
+}
+
 enum RelationshipType {
   PARTNER
   SIBLING
@@ -364,7 +422,9 @@ enum RelationshipEventType {
   REJECTED
   DIVORCED
   DATE_COMPLETED
+  ACTION_BOND_BOOST
   SIMULATION_COMPLETED
+  DUEL_COMPLETED
   STREAK_UPDATED
   QUEST_COMPLETED
   ANNIVERSARY_CLAIMED

@@ -6,6 +6,10 @@ import {
   ButtonStyle,
   EmbedBuilder,
   MessageFlags,
+  ModalBuilder,
+  PermissionFlagsBits,
+  TextInputBuilder,
+  TextInputStyle,
   type ButtonInteraction,
   type ChatInputCommandInteraction,
   type Client,
@@ -43,6 +47,8 @@ type FamilySimulationMilestoneEntry = {
   remaining: number;
   reward: SimulationMilestoneReward;
 };
+type FamilySimulationDuelOutcome = "WIN" | "LOSS" | "DRAW";
+type FamilySeasonRewardTier = Exclude<SimulationLadderTier, "UNRANKED" | "BRONZE" | "SILVER">;
 type SimulationLadderTier =
   | "UNRANKED"
   | "BRONZE"
@@ -148,6 +154,26 @@ const SIM_LADDER_REWARDS: Record<LadderRewardTier, SimulationMilestoneReward> = 
   DIAMOND: { xp: 400, coins: 520, bondXp: 110 },
   MYTHIC: { xp: 800, coins: 980, bondXp: 220 }
 };
+const FAMILY_SIM_DUEL_COOLDOWN_MS = 60 * 60 * 1000;
+const FAMILY_SIM_DUEL_REMATCH_LOCK_MS = 12 * 60 * 60 * 1000;
+const FAMILY_SIM_DUEL_WINDOW_1H_MS = 60 * 60 * 1000;
+const FAMILY_SIM_DUEL_WINDOW_24H_MS = 24 * 60 * 60 * 1000;
+const FAMILY_ACTION_COOLDOWN_MS = 90 * 1000;
+const FAMILY_ACTION_HOURLY_CAP = 6;
+const FAMILY_DUEL_ESCALATION_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+const FAMILY_PENALTY_DEFAULT_EXPIRY_MS = 14 * 24 * 60 * 60 * 1000;
+const SIM_SEASON_CLAIM_REWARDS: Record<FamilySeasonRewardTier, SimulationMilestoneReward> = {
+  GOLD: { xp: 160, coins: 220, bondXp: 45 },
+  PLATINUM: { xp: 300, coins: 420, bondXp: 90 },
+  DIAMOND: { xp: 560, coins: 760, bondXp: 170 },
+  MYTHIC: { xp: 950, coins: 1300, bondXp: 300 }
+};
+const FAMILY_ACTION_REWARDS: Record<string, { bondXp: number; bondScore: number }> = {
+  hug: { bondXp: 4, bondScore: 2 },
+  pat: { bondXp: 3, bondScore: 2 },
+  kiss: { bondXp: 6, bondScore: 3 },
+  cuddle: { bondXp: 5, bondScore: 3 }
+};
 const proposalTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
 const SETTINGS_CACHE_TTL_MS = 30_000;
 const PROFILE_CACHE_TTL_MS = 10_000;
@@ -156,6 +182,7 @@ const settingsCache = new Map<string, { value: any; expiresAt: number }>();
 const profileCache = new Map<string, { value: any; expiresAt: number }>();
 const coupleLeaderboardCache = new Map<number, { value: any; expiresAt: number }>();
 const familyLeaderboardCache = new Map<number, { value: any; expiresAt: number }>();
+const actionCooldownMap = new Map<string, number>();
 
 function isUnknownInteractionError(error: unknown) {
   return Boolean(
@@ -171,6 +198,111 @@ function ensureSocialDelegates() {
     throw new Error(
       "Family DB client is outdated. Run `pnpm --filter @cocosui/db generate` and restart the bot with Node 22."
     );
+  }
+}
+
+function hasFamilyModerationDelegates() {
+  return Boolean(fdb.familyModerationLog && fdb.familyPenaltyFlag);
+}
+
+async function createFamilyModerationLog(input: {
+  guildId: string | null;
+  relationshipId?: string | null;
+  userId?: string | null;
+  action: string;
+  severity?: "INFO" | "WARN" | "SEVERE";
+  details?: Record<string, unknown>;
+}) {
+  if (!fdb.familyModerationLog) return;
+  try {
+    await timedDb("familyModerationLog.create", () =>
+      fdb.familyModerationLog.create({
+        data: {
+          guildId: input.guildId,
+          relationshipId: input.relationshipId ?? null,
+          userId: input.userId ?? null,
+          action: input.action,
+          severity: input.severity ?? "INFO",
+          details: input.details ?? {}
+        }
+      })
+    );
+  } catch (error) {
+    logger.warn("Failed writing family moderation log.", error);
+  }
+}
+
+async function createFamilyPenaltyFlag(input: {
+  guildId: string | null;
+  relationshipId?: string | null;
+  userId?: string | null;
+  flagType: string;
+  reason: string;
+  penaltyScore: number;
+  active?: boolean;
+  metadata?: Record<string, unknown>;
+}) {
+  if (!fdb.familyPenaltyFlag) return;
+  try {
+    const baseScore = Math.max(1, input.penaltyScore);
+    const now = new Date();
+    const escalationWhere = {
+      active: true,
+      userId: input.userId ?? null,
+      relationshipId: input.relationshipId ?? null,
+      flagType: input.flagType,
+      createdAt: { gte: new Date(now.getTime() - FAMILY_DUEL_ESCALATION_WINDOW_MS) }
+    };
+    const recentCount = await timedDb("familyPenaltyFlag.count(escalation)", () =>
+      fdb.familyPenaltyFlag.count({ where: escalationWhere })
+    );
+    const escalatedScore = baseScore + Math.min(4, recentCount);
+    const created = await timedDb("familyPenaltyFlag.create", () =>
+      fdb.familyPenaltyFlag.create({
+        data: {
+          guildId: input.guildId,
+          relationshipId: input.relationshipId ?? null,
+          userId: input.userId ?? null,
+          flagType: input.flagType,
+          reason: input.reason,
+          penaltyScore: escalatedScore,
+          active: input.active ?? true,
+          metadata: input.metadata ?? {}
+        }
+      })
+    );
+    if (
+      (input.active ?? true) &&
+      input.relationshipId &&
+      fdb.socialRelationshipProgress &&
+      (recentCount >= 2 || escalatedScore >= 6)
+    ) {
+      const lockHours = recentCount >= 4 || escalatedScore >= 8 ? 72 : 12;
+      const lockedUntil = new Date(now.getTime() + lockHours * 60 * 60 * 1000);
+      await timedDb("socialRelationshipProgress.update(penaltyLockout)", () =>
+        fdb.socialRelationshipProgress.update({
+          where: { relationshipId: input.relationshipId },
+          data: { simDuelLockedUntil: lockedUntil }
+        })
+      );
+      await createFamilyModerationLog({
+        guildId: input.guildId,
+        relationshipId: input.relationshipId,
+        userId: input.userId,
+        action: "SIM_DUEL_LOCKOUT_APPLIED",
+        severity: "SEVERE",
+        details: {
+          lockHours,
+          lockedUntil,
+          recentCount,
+          escalatedScore,
+          baseScore,
+          flagId: created?.id ?? null
+        }
+      });
+    }
+  } catch (error) {
+    logger.warn("Failed writing family penalty flag.", error);
   }
 }
 
@@ -449,7 +581,9 @@ async function addRelationshipEvent(
     | "REJECTED"
     | "DIVORCED"
     | "DATE_COMPLETED"
+    | "ACTION_BOND_BOOST"
     | "SIMULATION_COMPLETED"
+    | "DUEL_COMPLETED"
     | "STREAK_UPDATED"
     | "QUEST_COMPLETED"
     | "ANNIVERSARY_CLAIMED",
@@ -663,6 +797,31 @@ function weekPeriodKeyFromDate(date: Date) {
   const jan1 = new Date(Date.UTC(y, 0, 1));
   const weekNo = Math.ceil((((weekStart.getTime() - jan1.getTime()) / 86400000) + 1) / 7);
   return `${y}-W${String(weekNo).padStart(2, "0")}`;
+}
+
+function normalizeSeasonState(progress: any, seasonKey: string) {
+  const fresh = (progress?.simSeasonKey ?? seasonKey) === seasonKey;
+  return {
+    key: seasonKey,
+    points: fresh ? progress?.simSeasonPoints ?? 0 : 0,
+    tier: fresh ? ((progress?.simSeasonTier as SimulationLadderTier | null) ?? "UNRANKED") : ("UNRANKED" as SimulationLadderTier),
+    rewardMask: fresh ? progress?.simSeasonRewardMask ?? 0 : 0
+  };
+}
+
+function simulationDuelPower(input: {
+  seasonPoints: number;
+  bondLevel: number;
+  bondScore: number;
+  bestSimWinStreak: number;
+}) {
+  const base =
+    input.seasonPoints * 0.8 +
+    input.bondLevel * 18 +
+    input.bondScore * 0.03 +
+    input.bestSimWinStreak * 6;
+  const jitter = (Math.random() - 0.5) * 30;
+  return base + jitter;
 }
 
 function monthKey(date: Date) {
@@ -1219,6 +1378,89 @@ export async function claimAnniversaryReward(input: { userId: string; guildId: s
   };
 }
 
+export async function awardPartnerActionBond(input: {
+  userId: string;
+  targetUserId: string;
+  guildId: string | null;
+  action: "hug" | "pat" | "kiss" | "cuddle";
+}) {
+  ensureSocialDelegates();
+  if (input.userId === input.targetUserId) return null;
+  const reward = FAMILY_ACTION_REWARDS[input.action];
+  if (!reward) return null;
+
+  const rel = await activeRelationship("PARTNER", input.userId, input.targetUserId);
+  if (!rel || rel.type !== "PARTNER" || rel.status !== "ACTIVE" || !rel.progress) return null;
+
+  const nowMs = Date.now();
+  const cooldownKey = `${rel.id}:${input.userId}:${input.action}`;
+  const nextAllowed = actionCooldownMap.get(cooldownKey) ?? 0;
+  if (nextAllowed > nowMs) {
+    return {
+      applied: false as const,
+      reason: "cooldown",
+      retryAt: new Date(nextAllowed)
+    };
+  }
+
+  const hourlyCount = await timedDb("socialRelationshipEvent.count(awardPartnerActionBond.hourly)", () =>
+    fdb.socialRelationshipEvent.count({
+      where: {
+        relationshipId: rel.id,
+        actorUserId: input.userId,
+        eventType: "ACTION_BOND_BOOST",
+        createdAt: { gte: new Date(nowMs - 60 * 60 * 1000) }
+      }
+    })
+  );
+  if (hourlyCount >= FAMILY_ACTION_HOURLY_CAP) {
+    return {
+      applied: false as const,
+      reason: "hourly_cap",
+      cap: FAMILY_ACTION_HOURLY_CAP
+    };
+  }
+
+  const currentBondXp = rel.progress.bondXp ?? 0;
+  const nextBondXp = currentBondXp + reward.bondXp;
+  const nextBond = computeBondLevel(nextBondXp);
+  await Promise.all([
+    timedDb("socialRelationshipProgress.update(awardPartnerActionBond)", () =>
+      fdb.socialRelationshipProgress.update({
+        where: { relationshipId: rel.id },
+        data: {
+          bondXp: nextBondXp,
+          bondLevel: nextBond.level,
+          bondScore: { increment: reward.bondScore }
+        }
+      })
+    ),
+    addRelationshipEvent(rel.id, input.userId, "ACTION_BOND_BOOST", {
+      action: input.action,
+      bondXpDelta: reward.bondXp,
+      bondScoreDelta: reward.bondScore
+    })
+  ]);
+  actionCooldownMap.set(cooldownKey, nowMs + FAMILY_ACTION_COOLDOWN_MS);
+  invalidateFamilyProfileCache(rel.userAId, rel.userBId);
+  invalidateFamilyLeaderboardCache();
+
+  return {
+    applied: true as const,
+    relationshipId: rel.id,
+    action: input.action,
+    rewards: {
+      bondXp: reward.bondXp,
+      bondScore: reward.bondScore
+    },
+    bond: {
+      level: nextBond.level,
+      progress: nextBond.progress,
+      required: nextBond.required
+    }
+  };
+}
+
 export async function getFamilyProfile(userId: string): Promise<any> {
   ensureSocialDelegates();
   const cached = profileCache.get(userId);
@@ -1592,6 +1834,843 @@ export async function getFamilySimulationLadder(input: { userId: string; limit?:
   };
 }
 
+export async function getFamilySimulationSeasonOverview(input: { userId: string; limit?: number }) {
+  const ladder = await getFamilySimulationLadder({ userId: input.userId, limit: input.limit ?? 10 });
+  const now = new Date();
+  const { weekStart } = periodStarts(now);
+  const seasonEndsAt = new Date(weekStart);
+  seasonEndsAt.setUTCDate(seasonEndsAt.getUTCDate() + 7);
+
+  return {
+    ...ladder,
+    seasonEndsAt
+  };
+}
+
+function previousWeekKeyFromDate(date: Date) {
+  const d = new Date(date);
+  d.setUTCDate(d.getUTCDate() - 7);
+  return weekPeriodKeyFromDate(d);
+}
+
+async function listActiveSimulationRows() {
+  return timedDb("socialRelationship.findMany(listActiveSimulationRows)", () =>
+    fdb.socialRelationship.findMany({
+      where: { type: "PARTNER", status: "ACTIVE" },
+      include: { progress: true }
+    })
+  );
+}
+
+function penaltyExpiryMs(flagType: string, penaltyScore: number) {
+  if (flagType === "DUEL_COLLUSION_SOFT") return 24 * 60 * 60 * 1000;
+  if (flagType === "DUEL_ALT_PATTERN") return 7 * 24 * 60 * 60 * 1000;
+  if (flagType === "DUEL_COLLUSION") {
+    return penaltyScore >= 8 ? 21 * 24 * 60 * 60 * 1000 : 10 * 24 * 60 * 60 * 1000;
+  }
+  return FAMILY_PENALTY_DEFAULT_EXPIRY_MS;
+}
+
+async function autoResolveExpiredPenaltyFlags(guildId?: string | null) {
+  if (!fdb.familyPenaltyFlag) return 0;
+  const where = guildId ? { active: true, guildId } : { active: true };
+  const activeFlags = await timedDb("familyPenaltyFlag.findMany(autoResolveExpiredPenaltyFlags)", () =>
+    fdb.familyPenaltyFlag.findMany({
+      where,
+      select: { id: true, flagType: true, penaltyScore: true, createdAt: true }
+    })
+  );
+  if (!activeFlags.length) return 0;
+  const nowMs = Date.now();
+  const expiredIds = activeFlags
+    .filter((f: { flagType: string; penaltyScore: number; createdAt: Date }) => {
+      const age = nowMs - new Date(f.createdAt).getTime();
+      return age >= penaltyExpiryMs(f.flagType, f.penaltyScore ?? 1);
+    })
+    .map((f: { id: string }) => f.id);
+  if (!expiredIds.length) return 0;
+  await timedDb("familyPenaltyFlag.updateMany(autoResolveExpiredPenaltyFlags)", () =>
+    fdb.familyPenaltyFlag.updateMany({
+      where: { id: { in: expiredIds }, active: true },
+      data: { active: false, resolvedAt: new Date() }
+    })
+  );
+  return expiredIds.length;
+}
+
+export async function adminForceStartFamilySimulationSeason(input: {
+  adminUserId: string;
+  guildId: string | null;
+  seasonKey?: string | null;
+}) {
+  ensureSocialDelegates();
+  const seasonKey = input.seasonKey?.trim() || weekPeriodKeyFromDate(new Date());
+  const rows = await listActiveSimulationRows();
+  let touched = 0;
+  for (const rel of rows as Array<any>) {
+    if (!rel.progress) continue;
+    await timedDb("socialRelationshipProgress.update(adminForceStartFamilySimulationSeason)", () =>
+      fdb.socialRelationshipProgress.update({
+        where: { relationshipId: rel.id },
+        data: {
+          simSeasonKey: seasonKey,
+          simSeasonPoints: 0,
+          simSeasonTier: "UNRANKED",
+          simSeasonRewardMask: 0
+        }
+      })
+    );
+    touched += 1;
+  }
+  await createFamilyModerationLog({
+    guildId: input.guildId,
+    userId: input.adminUserId,
+    action: "SIM_SEASON_FORCE_START",
+    severity: "WARN",
+    details: { seasonKey, touched }
+  });
+  invalidateFamilyLeaderboardCache();
+  return { seasonKey, touched };
+}
+
+export async function adminForceEndFamilySimulationSeason(input: {
+  adminUserId: string;
+  guildId: string | null;
+  seasonKey?: string | null;
+}) {
+  ensureSocialDelegates();
+  const seasonKey = input.seasonKey?.trim() || previousWeekKeyFromDate(new Date());
+  const rows = await listActiveSimulationRows();
+  let touched = 0;
+  for (const rel of rows as Array<any>) {
+    if (!rel.progress) continue;
+    await timedDb("socialRelationshipProgress.update(adminForceEndFamilySimulationSeason)", () =>
+      fdb.socialRelationshipProgress.update({
+        where: { relationshipId: rel.id },
+        data: { simSeasonKey: seasonKey }
+      })
+    );
+    touched += 1;
+  }
+  await createFamilyModerationLog({
+    guildId: input.guildId,
+    userId: input.adminUserId,
+    action: "SIM_SEASON_FORCE_END",
+    severity: "WARN",
+    details: { seasonKey, touched }
+  });
+  invalidateFamilyLeaderboardCache();
+  return { seasonKey, touched };
+}
+
+export async function adminResetFamilySimulationLadder(input: {
+  adminUserId: string;
+  guildId: string | null;
+  seasonKey?: string | null;
+}) {
+  ensureSocialDelegates();
+  const seasonKey = input.seasonKey?.trim() || weekPeriodKeyFromDate(new Date());
+  const rows = await listActiveSimulationRows();
+  let touched = 0;
+  for (const rel of rows as Array<any>) {
+    if (!rel.progress) continue;
+    await timedDb("socialRelationshipProgress.update(adminResetFamilySimulationLadder)", () =>
+      fdb.socialRelationshipProgress.update({
+        where: { relationshipId: rel.id },
+        data: {
+          simSeasonKey: seasonKey,
+          simSeasonPoints: 0,
+          simSeasonTier: "UNRANKED",
+          simSeasonRewardMask: 0
+        }
+      })
+    );
+    touched += 1;
+  }
+  await createFamilyModerationLog({
+    guildId: input.guildId,
+    userId: input.adminUserId,
+    action: "SIM_LADDER_RESET",
+    severity: "WARN",
+    details: { seasonKey, touched }
+  });
+  invalidateFamilyLeaderboardCache();
+  return { seasonKey, touched };
+}
+
+export async function adminRecomputeFamilySimulationLadder(input: {
+  adminUserId: string;
+  guildId: string | null;
+  seasonKey?: string | null;
+}) {
+  ensureSocialDelegates();
+  const seasonKey = input.seasonKey?.trim() || weekPeriodKeyFromDate(new Date());
+  const rows = await listActiveSimulationRows();
+  let touched = 0;
+  for (const rel of rows as Array<any>) {
+    if (!rel.progress) continue;
+    const points =
+      (rel.progress.simSeasonKey ?? seasonKey) === seasonKey
+        ? rel.progress.simSeasonPoints ?? 0
+        : 0;
+    await timedDb("socialRelationshipProgress.update(adminRecomputeFamilySimulationLadder)", () =>
+      fdb.socialRelationshipProgress.update({
+        where: { relationshipId: rel.id },
+        data: {
+          simSeasonKey: seasonKey,
+          simSeasonPoints: points,
+          simSeasonTier: ladderTierFromPoints(points)
+        }
+      })
+    );
+    touched += 1;
+  }
+  await createFamilyModerationLog({
+    guildId: input.guildId,
+    userId: input.adminUserId,
+    action: "SIM_LADDER_RECOMPUTE",
+    severity: "INFO",
+    details: { seasonKey, touched }
+  });
+  invalidateFamilyLeaderboardCache();
+  return { seasonKey, touched };
+}
+
+export async function getFamilyModerationAudit(input: {
+  limit?: number;
+  guildId?: string | null;
+}) {
+  if (!hasFamilyModerationDelegates()) {
+    return {
+      supported: false as const,
+      logs: [] as Array<any>,
+      activeFlags: [] as Array<any>
+    };
+  }
+  const autoResolved = await autoResolveExpiredPenaltyFlags(input.guildId ?? null);
+  const limit = Math.max(1, Math.min(25, input.limit ?? 10));
+  const where = input.guildId ? { guildId: input.guildId } : {};
+  const [logs, activeFlags] = await Promise.all([
+    timedDb("familyModerationLog.findMany(getFamilyModerationAudit.logs)", () =>
+      fdb.familyModerationLog.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        take: limit
+      })
+    ),
+    timedDb("familyPenaltyFlag.findMany(getFamilyModerationAudit.flags)", () =>
+      fdb.familyPenaltyFlag.findMany({
+        where: { ...where, active: true },
+        orderBy: { createdAt: "desc" },
+        take: limit
+      })
+    )
+  ]);
+  return {
+    supported: true as const,
+    autoResolved,
+    logs,
+    activeFlags
+  };
+}
+
+export async function adminClearFamilyPenaltyFlags(input: {
+  adminUserId: string;
+  guildId: string | null;
+  flagId?: string | null;
+  userId?: string | null;
+  relationshipId?: string | null;
+  clearAll?: boolean;
+  reason?: string | null;
+  note?: string | null;
+}) {
+  if (!hasFamilyModerationDelegates()) {
+    return { supported: false as const, cleared: 0, matched: 0 };
+  }
+  const autoResolved = await autoResolveExpiredPenaltyFlags(input.guildId);
+  const where: Record<string, unknown> = { active: true };
+  if (input.guildId) where.guildId = input.guildId;
+  if (input.flagId) where.id = input.flagId;
+  if (input.userId) where.userId = input.userId;
+  if (input.relationshipId) where.relationshipId = input.relationshipId;
+
+  const hasFilter = Boolean(input.flagId || input.userId || input.relationshipId);
+  if (!hasFilter && !input.clearAll) {
+    throw new Error("Provide a flag id/user/relationship filter or pass all=true.");
+  }
+
+  const matches = await timedDb("familyPenaltyFlag.findMany(adminClearFamilyPenaltyFlags)", () =>
+    fdb.familyPenaltyFlag.findMany({
+      where,
+      select: { id: true }
+    })
+  );
+  const ids = matches.map((m: { id: string }) => m.id);
+  if (!ids.length) {
+    return { supported: true as const, cleared: 0, matched: 0, autoResolved };
+  }
+  const result = await timedDb("familyPenaltyFlag.updateMany(adminClearFamilyPenaltyFlags)", () =>
+    fdb.familyPenaltyFlag.updateMany({
+      where: { id: { in: ids }, active: true },
+      data: { active: false, resolvedAt: new Date() }
+    })
+  );
+  await createFamilyModerationLog({
+    guildId: input.guildId,
+    userId: input.adminUserId,
+    action: "SIM_PENALTY_MANUAL_CLEAR",
+    severity: "WARN",
+    details: {
+      cleared: result.count ?? ids.length,
+      filter: {
+        flagId: input.flagId ?? null,
+        userId: input.userId ?? null,
+        relationshipId: input.relationshipId ?? null,
+        clearAll: Boolean(input.clearAll)
+      },
+      reason: input.reason ?? null,
+      note: input.note ?? null,
+      autoResolved
+    }
+  });
+  return {
+    supported: true as const,
+    cleared: result.count ?? ids.length,
+    matched: ids.length,
+    autoResolved
+  };
+}
+
+export async function claimFamilySimulationSeasonRewards(input: {
+  userId: string;
+  guildId: string | null;
+}) {
+  ensureSocialDelegates();
+  const rel = await activePartnerFor(input.userId);
+  if (!rel) throw new Error("You need an active partner to claim season rewards.");
+  if (!rel.progress) throw new Error("Relationship progress missing.");
+
+  const now = new Date();
+  const activeSeasonKey = weekPeriodKeyFromDate(now);
+  const claimSeasonKey = rel.progress.simSeasonKey;
+  if (!claimSeasonKey) throw new Error("No previous season data to claim yet.");
+  if (claimSeasonKey === activeSeasonKey) {
+    throw new Error("Season is still active. Claim when the next weekly season starts.");
+  }
+
+  const tier = (rel.progress.simSeasonTier as SimulationLadderTier | null) ?? "UNRANKED";
+  if (tier === "UNRANKED" || tier === "BRONZE" || tier === "SILVER") {
+    throw new Error(`No claim reward available for tier ${tier}. Reach GOLD+ to claim season rewards.`);
+  }
+
+  const existing = await timedDb("familySeasonClaim.findUnique(claimFamilySimulationSeasonRewards)", () =>
+    fdb.familySeasonClaim.findUnique({
+      where: {
+        userId_seasonKey_relationshipId: {
+          userId: input.userId,
+          seasonKey: claimSeasonKey,
+          relationshipId: rel.id
+        }
+      }
+    })
+  );
+  if (existing) throw new Error(`Season ${claimSeasonKey} rewards already claimed.`);
+
+  const reward = SIM_SEASON_CLAIM_REWARDS[tier as FamilySeasonRewardTier];
+  if (!reward) throw new Error("No season reward configured for current tier.");
+
+  const ladderRows = await getFamilySimulationLadder({ userId: input.userId, limit: 200 });
+  const selfRank = ladderRows.selfRank;
+
+  const seasonRewardRate = (await getFamilySettings(input.guildId)).relationshipRewardRate;
+  const rewardXp = Math.floor(reward.xp * seasonRewardRate);
+  const rewardCoins = Math.floor(reward.coins * seasonRewardRate);
+  const rewardBondXp = Math.floor(reward.bondXp * seasonRewardRate);
+
+  const nextBond = computeBondLevel((rel.progress.bondXp ?? 0) + rewardBondXp);
+
+  await Promise.all([
+    timedDb("familySeasonClaim.create(claimFamilySimulationSeasonRewards)", () =>
+      fdb.familySeasonClaim.create({
+        data: {
+          userId: input.userId,
+          guildId: input.guildId,
+          seasonKey: claimSeasonKey,
+          relationshipId: rel.id,
+          tier,
+          rank: selfRank ?? null,
+          rewardXP: rewardXp,
+          rewardCoins: rewardCoins,
+          rewardBondXp: rewardBondXp
+        }
+      })
+    ),
+    timedDb("userProgress.upsert(claimFamilySimulationSeasonRewards)", () =>
+      fdb.userProgress.upsert({
+        where: { userId: input.userId },
+        update: {
+          guildId: input.guildId,
+          xp: { increment: rewardXp },
+          coins: { increment: rewardCoins }
+        },
+        create: {
+          userId: input.userId,
+          guildId: input.guildId,
+          level: 1,
+          title: "Rookie",
+          xp: rewardXp,
+          coins: rewardCoins
+        }
+      })
+    ),
+    timedDb("socialRelationshipProgress.update(claimFamilySimulationSeasonRewards)", () =>
+      fdb.socialRelationshipProgress.update({
+        where: { relationshipId: rel.id },
+        data: {
+          bondXp: (rel.progress.bondXp ?? 0) + rewardBondXp,
+          bondLevel: nextBond.level,
+          bondScore: { increment: Math.floor(rewardBondXp / 2) }
+        }
+      })
+    ),
+    timedDb("transaction.create(claimFamilySimulationSeasonRewards)", () =>
+      fdb.transaction.create({
+        data: {
+          userId: input.userId,
+          guildId: input.guildId,
+          amount: rewardCoins,
+          reason: "family-sim-season-claim"
+        }
+      })
+    )
+  ]);
+
+  invalidateFamilyProfileCache(rel.userAId, rel.userBId);
+  invalidateFamilyLeaderboardCache();
+
+  return {
+    seasonKey: claimSeasonKey,
+    tier,
+    rank: selfRank,
+    rewards: {
+      xp: rewardXp,
+      coins: rewardCoins,
+      bondXp: rewardBondXp
+    }
+  };
+}
+
+export async function awardFamilySimulationDuel(input: {
+  userId: string;
+  opponentUserId: string;
+  guildId: string | null;
+  username: string;
+}) {
+  ensureSocialDelegates();
+  if (input.userId === input.opponentUserId) throw new Error("You cannot duel yourself.");
+
+  const [selfRel, oppRel] = await Promise.all([
+    activePartnerFor(input.userId),
+    activePartnerFor(input.opponentUserId)
+  ]);
+  if (!selfRel) throw new Error("You need an active partner to start a duel.");
+  if (!oppRel) throw new Error("Opponent needs an active partner to be dueled.");
+  if (selfRel.id === oppRel.id) throw new Error("You cannot duel your own couple.");
+  if (!selfRel.progress || !oppRel.progress) throw new Error("Relationship progress missing.");
+
+  const now = new Date();
+  await autoResolveExpiredPenaltyFlags(input.guildId);
+  if (
+    selfRel.progress.simDuelLockedUntil &&
+    new Date(selfRel.progress.simDuelLockedUntil).getTime() > now.getTime()
+  ) {
+    const next = Math.floor(new Date(selfRel.progress.simDuelLockedUntil).getTime() / 1000);
+    throw new Error(`Your couple is duel-locked by anti-abuse controls until <t:${next}:R>.`);
+  }
+  if (
+    oppRel.progress.simDuelLockedUntil &&
+    new Date(oppRel.progress.simDuelLockedUntil).getTime() > now.getTime()
+  ) {
+    const next = Math.floor(new Date(oppRel.progress.simDuelLockedUntil).getTime() / 1000);
+    throw new Error(`Opponent couple is duel-locked until <t:${next}:R>.`);
+  }
+  const seasonKey = weekPeriodKeyFromDate(now);
+  const selfSeason = normalizeSeasonState(selfRel.progress, seasonKey);
+  const oppSeason = normalizeSeasonState(oppRel.progress, seasonKey);
+
+  const [selfCooldownEvent, rematchEvent] = await Promise.all([
+    timedDb("socialRelationshipEvent.findFirst(awardFamilySimulationDuel.cooldown)", () =>
+      fdb.socialRelationshipEvent.findFirst({
+        where: {
+          relationshipId: selfRel.id,
+          eventType: "DUEL_COMPLETED"
+        },
+        orderBy: { createdAt: "desc" }
+      })
+    ),
+    timedDb("socialRelationshipEvent.findFirst(awardFamilySimulationDuel.rematch)", () =>
+      fdb.socialRelationshipEvent.findFirst({
+        where: {
+          eventType: "DUEL_COMPLETED",
+          createdAt: { gte: new Date(now.getTime() - FAMILY_SIM_DUEL_REMATCH_LOCK_MS) },
+          OR: [
+            {
+              relationshipId: selfRel.id,
+              metadata: { path: ["opponentRelationshipId"], equals: oppRel.id }
+            },
+            {
+              relationshipId: oppRel.id,
+              metadata: { path: ["opponentRelationshipId"], equals: selfRel.id }
+            }
+          ]
+        },
+        orderBy: { createdAt: "desc" }
+      })
+    )
+  ]);
+  if (
+    selfCooldownEvent &&
+    now.getTime() - new Date(selfCooldownEvent.createdAt).getTime() < FAMILY_SIM_DUEL_COOLDOWN_MS
+  ) {
+    const next = Math.floor(
+      (new Date(selfCooldownEvent.createdAt).getTime() + FAMILY_SIM_DUEL_COOLDOWN_MS) / 1000
+    );
+    throw new Error(`Duel cooldown active. Try again <t:${next}:R>.`);
+  }
+  if (rematchEvent) {
+    const next = Math.floor(
+      (new Date(rematchEvent.createdAt).getTime() + FAMILY_SIM_DUEL_REMATCH_LOCK_MS) / 1000
+    );
+    throw new Error(`Rematch lock active for this couple pair. Try again <t:${next}:R>.`);
+  }
+
+  const [pairDuels24h, pairDuels1h, actorDuelEvents24h] = await Promise.all([
+    timedDb("socialRelationshipEvent.count(awardFamilySimulationDuel.pair24h)", () =>
+      fdb.socialRelationshipEvent.count({
+        where: {
+          eventType: "DUEL_COMPLETED",
+          createdAt: { gte: new Date(now.getTime() - FAMILY_SIM_DUEL_WINDOW_24H_MS) },
+          OR: [
+            {
+              relationshipId: selfRel.id,
+              metadata: { path: ["opponentRelationshipId"], equals: oppRel.id }
+            },
+            {
+              relationshipId: oppRel.id,
+              metadata: { path: ["opponentRelationshipId"], equals: selfRel.id }
+            }
+          ]
+        }
+      })
+    ),
+    timedDb("socialRelationshipEvent.count(awardFamilySimulationDuel.pair1h)", () =>
+      fdb.socialRelationshipEvent.count({
+        where: {
+          eventType: "DUEL_COMPLETED",
+          createdAt: { gte: new Date(now.getTime() - FAMILY_SIM_DUEL_WINDOW_1H_MS) },
+          OR: [
+            {
+              relationshipId: selfRel.id,
+              metadata: { path: ["opponentRelationshipId"], equals: oppRel.id }
+            },
+            {
+              relationshipId: oppRel.id,
+              metadata: { path: ["opponentRelationshipId"], equals: selfRel.id }
+            }
+          ]
+        }
+      })
+    ),
+    timedDb("socialRelationshipEvent.findMany(awardFamilySimulationDuel.actor24h)", () =>
+      fdb.socialRelationshipEvent.findMany({
+        where: {
+          relationshipId: selfRel.id,
+          eventType: "DUEL_COMPLETED",
+          actorUserId: input.userId,
+          createdAt: { gte: new Date(now.getTime() - FAMILY_SIM_DUEL_WINDOW_24H_MS) }
+        },
+        select: { metadata: true }
+      })
+    )
+  ]);
+
+  const uniqueOpponents24h = new Set(
+    actorDuelEvents24h
+      .map((e: { metadata?: Record<string, unknown> | null }) =>
+        typeof e.metadata?.opponentRelationshipId === "string"
+          ? e.metadata.opponentRelationshipId
+          : null
+      )
+      .filter((x: string | null): x is string => Boolean(x))
+  ).size;
+
+  const severeCollusion = pairDuels24h >= 8 || pairDuels1h >= 4;
+  const altPattern = actorDuelEvents24h.length >= 8 && uniqueOpponents24h <= 1;
+  const mildCollusion = pairDuels24h >= 5 || pairDuels1h >= 3;
+
+  if (severeCollusion || altPattern) {
+    const reason = severeCollusion
+      ? "Repeated duel collusion pattern detected."
+      : "Alt-pattern duel farming detected.";
+    await Promise.all([
+      createFamilyPenaltyFlag({
+        guildId: input.guildId,
+        relationshipId: selfRel.id,
+        userId: input.userId,
+        flagType: severeCollusion ? "DUEL_COLLUSION" : "DUEL_ALT_PATTERN",
+        reason,
+        penaltyScore: severeCollusion ? 6 : 5,
+        metadata: {
+          pairDuels24h,
+          pairDuels1h,
+          actorDuels24h: actorDuelEvents24h.length,
+          uniqueOpponents24h
+        }
+      }),
+      createFamilyModerationLog({
+        guildId: input.guildId,
+        relationshipId: selfRel.id,
+        userId: input.userId,
+        action: "SIM_DUEL_BLOCKED",
+        severity: "SEVERE",
+        details: {
+          reason,
+          opponentUserId: input.opponentUserId,
+          pairDuels24h,
+          pairDuels1h,
+          actorDuels24h: actorDuelEvents24h.length,
+          uniqueOpponents24h
+        }
+      })
+    ]);
+    throw new Error("Duel blocked by anti-abuse guard. Staff log created.");
+  }
+
+  const selfPower = simulationDuelPower({
+    seasonPoints: selfSeason.points,
+    bondLevel: selfRel.progress.bondLevel ?? 1,
+    bondScore: selfRel.progress.bondScore ?? 0,
+    bestSimWinStreak: selfRel.progress.simBestWinStreak ?? 0
+  });
+  const oppPower = simulationDuelPower({
+    seasonPoints: oppSeason.points,
+    bondLevel: oppRel.progress.bondLevel ?? 1,
+    bondScore: oppRel.progress.bondScore ?? 0,
+    bestSimWinStreak: oppRel.progress.simBestWinStreak ?? 0
+  });
+
+  const diff = selfPower - oppPower;
+  let outcome: FamilySimulationDuelOutcome = "DRAW";
+  if (Math.abs(diff) > 8) {
+    outcome = diff > 0 ? "WIN" : "LOSS";
+  } else {
+    const roll = Math.random();
+    if (roll < 0.42) outcome = "WIN";
+    else if (roll < 0.84) outcome = "LOSS";
+  }
+
+  const baseTransfer = 18;
+  const gapFactor = Math.max(0.6, Math.min(1.4, 1 + (oppSeason.points - selfSeason.points) / 500));
+  const transferRaw = Math.max(8, Math.min(36, Math.round(baseTransfer * gapFactor)));
+  const abuseMultiplier = mildCollusion ? 0.55 : 1;
+  const transfer = Math.max(6, Math.round(transferRaw * abuseMultiplier));
+  const drawShift = Math.max(2, Math.round(transfer * 0.2));
+
+  let selfDelta = 0;
+  let oppDelta = 0;
+  if (outcome === "WIN") {
+    selfDelta = transfer;
+    oppDelta = -transfer;
+  } else if (outcome === "LOSS") {
+    selfDelta = -transfer;
+    oppDelta = transfer;
+  } else {
+    selfDelta = drawShift;
+    oppDelta = drawShift;
+  }
+
+  const selfNextPoints = Math.max(0, selfSeason.points + selfDelta);
+  const oppNextPoints = Math.max(0, oppSeason.points + oppDelta);
+  const selfNextTier = ladderTierFromPoints(selfNextPoints);
+  const oppNextTier = ladderTierFromPoints(oppNextPoints);
+
+  await Promise.all([
+    timedDb("socialRelationshipProgress.update(awardFamilySimulationDuel.self)", () =>
+      fdb.socialRelationshipProgress.update({
+        where: { relationshipId: selfRel.id },
+        data: {
+          simSeasonKey: seasonKey,
+          simSeasonPoints: selfNextPoints,
+          simSeasonTier: selfNextTier
+        }
+      })
+    ),
+    timedDb("socialRelationshipProgress.update(awardFamilySimulationDuel.opp)", () =>
+      fdb.socialRelationshipProgress.update({
+        where: { relationshipId: oppRel.id },
+        data: {
+          simSeasonKey: seasonKey,
+          simSeasonPoints: oppNextPoints,
+          simSeasonTier: oppNextTier
+        }
+      })
+    ),
+    addRelationshipEvent(selfRel.id, input.userId, "DUEL_COMPLETED", {
+      outcome,
+      seasonKey,
+      power: selfPower,
+      opponentPower: oppPower,
+      pointsDelta: selfDelta,
+      pointsAfter: selfNextPoints,
+      opponentRelationshipId: oppRel.id,
+      antiAbuse: {
+        mildCollusion,
+        abuseMultiplier,
+        pairDuels24h,
+        pairDuels1h,
+        actorDuels24h: actorDuelEvents24h.length,
+        uniqueOpponents24h
+      }
+    }),
+    addRelationshipEvent(oppRel.id, input.userId, "DUEL_COMPLETED", {
+      outcome: outcome === "WIN" ? "LOSS" : outcome === "LOSS" ? "WIN" : "DRAW",
+      seasonKey,
+      power: oppPower,
+      opponentPower: selfPower,
+      pointsDelta: oppDelta,
+      pointsAfter: oppNextPoints,
+      opponentRelationshipId: selfRel.id,
+      antiAbuse: {
+        mildCollusion,
+        abuseMultiplier,
+        pairDuels24h,
+        pairDuels1h,
+        actorDuels24h: actorDuelEvents24h.length,
+        uniqueOpponents24h
+      }
+    }),
+    grantCommandProgress({
+      userId: input.userId,
+      guildId: input.guildId,
+      username: input.username,
+      commandName: "family_sim_duel"
+    }),
+    mildCollusion
+      ? createFamilyModerationLog({
+          guildId: input.guildId,
+          relationshipId: selfRel.id,
+          userId: input.userId,
+          action: "SIM_DUEL_DAMPENED",
+          severity: "WARN",
+          details: {
+            opponentUserId: input.opponentUserId,
+            abuseMultiplier,
+            pairDuels24h,
+            pairDuels1h,
+            actorDuels24h: actorDuelEvents24h.length,
+            uniqueOpponents24h
+          }
+        })
+      : Promise.resolve(),
+    mildCollusion
+      ? createFamilyPenaltyFlag({
+          guildId: input.guildId,
+          relationshipId: selfRel.id,
+          userId: input.userId,
+          flagType: "DUEL_COLLUSION_SOFT",
+          reason: "Duel rewards dampened due to repeated same-opponent pattern.",
+          penaltyScore: 2,
+          active: false,
+          metadata: {
+            abuseMultiplier,
+            pairDuels24h,
+            pairDuels1h,
+            actorDuels24h: actorDuelEvents24h.length,
+            uniqueOpponents24h
+          }
+        })
+      : Promise.resolve()
+  ]);
+
+  invalidateFamilyProfileCache(selfRel.userAId, selfRel.userBId, oppRel.userAId, oppRel.userBId);
+  invalidateFamilyLeaderboardCache();
+
+  return {
+    seasonKey,
+    relationshipId: selfRel.id,
+    opponentRelationshipId: oppRel.id,
+    outcome,
+    transfer,
+    antiAbuse: {
+      dampened: mildCollusion,
+      multiplier: abuseMultiplier,
+      pairDuels24h,
+      pairDuels1h,
+      actorDuels24h: actorDuelEvents24h.length,
+      uniqueOpponents24h
+    },
+    self: {
+      relationshipId: selfRel.id,
+      userAId: selfRel.userAId,
+      userBId: selfRel.userBId,
+      pointsBefore: selfSeason.points,
+      pointsAfter: selfNextPoints,
+      pointsDelta: selfDelta,
+      tierBefore: selfSeason.tier,
+      tierAfter: selfNextTier,
+      power: Number(selfPower.toFixed(2))
+    },
+    opponent: {
+      relationshipId: oppRel.id,
+      userAId: oppRel.userAId,
+      userBId: oppRel.userBId,
+      pointsBefore: oppSeason.points,
+      pointsAfter: oppNextPoints,
+      pointsDelta: oppDelta,
+      tierBefore: oppSeason.tier,
+      tierAfter: oppNextTier,
+      power: Number(oppPower.toFixed(2))
+    }
+  };
+}
+
+export async function getFamilySimulationDuelHistory(input: { userId: string; limit?: number }) {
+  ensureSocialDelegates();
+  const rel = await activePartnerFor(input.userId);
+  if (!rel) throw new Error("You need an active partner to view duel history.");
+
+  const limit = Math.max(1, Math.min(20, input.limit ?? 10));
+  const events = await timedDb("socialRelationshipEvent.findMany(getFamilySimulationDuelHistory)", () =>
+    fdb.socialRelationshipEvent.findMany({
+      where: { relationshipId: rel.id, eventType: "DUEL_COMPLETED" },
+      orderBy: { createdAt: "desc" },
+      take: limit
+    })
+  );
+  const lines = events.map((e: any, i: number) => {
+    const meta = (e.metadata ?? {}) as Record<string, unknown>;
+    const outcome = String(meta.outcome ?? "DRAW").toUpperCase();
+    const delta = Number(meta.pointsDelta ?? 0);
+    const after = Number(meta.pointsAfter ?? 0);
+    const oppRelId = String(meta.opponentRelationshipId ?? "");
+    const badge = outcome === "WIN" ? "✅" : outcome === "LOSS" ? "⚠️" : "▫️";
+    return {
+      idx: i + 1,
+      createdAt: new Date(e.createdAt),
+      badge,
+      outcome,
+      pointsDelta: Number.isFinite(delta) ? delta : 0,
+      pointsAfter: Number.isFinite(after) ? after : 0,
+      opponentRelationshipId: oppRelId
+    };
+  });
+
+  return {
+    relationshipId: rel.id,
+    lines
+  };
+}
+
 export function buildFamilySimulationPanelComponents(controllerId: string) {
   return [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -1617,6 +2696,59 @@ export function buildFamilySimulationPanelComponents(controllerId: string) {
         .setStyle(ButtonStyle.Secondary)
     )
   ];
+}
+
+export function buildFamilySimulationAdminPanelComponents(controllerId: string) {
+  return [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`family:simadminpanel:${controllerId}:start`)
+        .setLabel("Season Start")
+        .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId(`family:simadminpanel:${controllerId}:end`)
+        .setLabel("Season End")
+        .setStyle(ButtonStyle.Danger),
+      new ButtonBuilder()
+        .setCustomId(`family:simadminpanel:${controllerId}:reset`)
+        .setLabel("Reset Ladder")
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId(`family:simadminpanel:${controllerId}:recompute`)
+        .setLabel("Recompute Ladder")
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId(`family:simadminpanel:${controllerId}:audit`)
+        .setLabel("Audit")
+        .setStyle(ButtonStyle.Secondary)
+    ),
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`family:simadminpanel:${controllerId}:clear`)
+        .setLabel("Clear Penalties")
+        .setStyle(ButtonStyle.Danger)
+    )
+  ];
+}
+
+export function buildFamilySimulationAdminPanelEmbed(user: User) {
+  return new EmbedBuilder()
+    .setColor(0xf59e0b)
+    .setAuthor({
+      name: `${user.displayName}'s Family Sim Admin`,
+      iconURL: user.displayAvatarURL()
+    })
+    .setDescription(
+      [
+        "Admin Control Surface",
+        "",
+        "• Start/End season",
+        "• Reset/Recompute ladder",
+        "• Inspect anti-abuse logs",
+        "• Clear active penalties (with modal reason)"
+      ].join("\n")
+    )
+    .setFooter({ text: "Manage Server permission required." });
 }
 
 export function buildFamilySimulationResultEmbed(
@@ -1709,7 +2841,9 @@ export function buildFamilySimulationStatsEmbed(
         "",
         `Outcomes: ✅ \`${stats.good}\` • ▫️ \`${stats.neutral}\` • ⚠️ \`${stats.bad}\``,
         `Avg UwU Δ: \`${stats.avgBondScoreDelta >= 0 ? "+" : ""}${stats.avgBondScoreDelta}\` • Avg BondXP Δ: \`${stats.avgBondXpDelta >= 0 ? "+" : ""}${stats.avgBondXpDelta}\``
-      ].join("\n")
+      ]
+        .filter(Boolean)
+        .join("\n")
     )
     .addFields({ name: "Recent Simulations", value: recentLines })
     .setFooter({ text: "Team Tatsui ❤️" });
@@ -1816,6 +2950,188 @@ export function buildFamilySimulationLadderEmbed(
       ].join("\n")
     )
     .addFields({ name: "Top Couples", value: rowsText })
+    .setFooter({ text: "Team Tatsui ❤️" });
+}
+
+export function buildFamilySimulationDuelResultEmbed(
+  duel: Awaited<ReturnType<typeof awardFamilySimulationDuel>>,
+  user: User
+) {
+  const badge =
+    duel.outcome === "WIN" ? "🏆 Victory" : duel.outcome === "LOSS" ? "💥 Defeat" : "🤝 Draw";
+  const selfTierChange =
+    duel.self.tierBefore !== duel.self.tierAfter
+      ? `(${ladderTierEmoji(duel.self.tierBefore)} ${duel.self.tierBefore} → ${ladderTierEmoji(duel.self.tierAfter)} ${duel.self.tierAfter})`
+      : `(${ladderTierEmoji(duel.self.tierAfter)} ${duel.self.tierAfter})`;
+
+  return new EmbedBuilder()
+    .setColor(duel.outcome === "WIN" ? 0x15ff00 : duel.outcome === "LOSS" ? 0xff4400 : 0xf72585)
+    .setAuthor({
+      name: `${user.displayName}'s Sim Duel`,
+      iconURL: user.displayAvatarURL()
+    })
+    .setDescription(
+      [
+        `${badge}`,
+        `Season: **${duel.seasonKey}**`,
+        "",
+        `Your Couple: <@${duel.self.userAId}> ♡ <@${duel.self.userBId}>`,
+        `Opponent: <@${duel.opponent.userAId}> ♡ <@${duel.opponent.userBId}>`,
+        "",
+        `Power: \`${duel.self.power}\` vs \`${duel.opponent.power}\``,
+        `Points: \`${duel.self.pointsBefore}\` → \`${duel.self.pointsAfter}\` (${duel.self.pointsDelta >= 0 ? "+" : ""}${duel.self.pointsDelta}) ${selfTierChange}`,
+        `Opponent Points: \`${duel.opponent.pointsBefore}\` → \`${duel.opponent.pointsAfter}\` (${duel.opponent.pointsDelta >= 0 ? "+" : ""}${duel.opponent.pointsDelta})`,
+        duel.antiAbuse?.dampened
+          ? `⚠️ Anti-abuse dampening applied (\`${Math.round((duel.antiAbuse.multiplier ?? 1) * 100)}%\` rewards).`
+          : null
+      ].join("\n")
+    )
+    .setFooter({ text: "Team Tatsui ❤️" });
+}
+
+export function buildFamilySimulationDuelHistoryEmbed(
+  history: Awaited<ReturnType<typeof getFamilySimulationDuelHistory>>,
+  user: User
+) {
+  const lines =
+    history.lines.length > 0
+      ? history.lines
+          .map((l: (typeof history.lines)[number]) => {
+            const delta = `${l.pointsDelta >= 0 ? "+" : ""}${l.pointsDelta}`;
+            return `\`${l.idx}.\` ${l.badge} <t:${Math.floor(l.createdAt.getTime() / 1000)}:R>\n> Outcome: \`${l.outcome}\` • Points Δ: \`${delta}\` • After: \`${l.pointsAfter}\``;
+          })
+          .join("\n")
+      : "No duel history yet.";
+
+  return new EmbedBuilder()
+    .setColor(0xf72585)
+    .setAuthor({
+      name: `${user.displayName}'s Duel History`,
+      iconURL: user.displayAvatarURL()
+    })
+    .setDescription("Recent couple-vs-couple simulation duels")
+    .addFields({ name: "Last Duels", value: lines })
+    .setFooter({ text: "Team Tatsui ❤️" });
+}
+
+export function buildFamilySimulationSeasonOverviewEmbed(
+  season: Awaited<ReturnType<typeof getFamilySimulationSeasonOverview>>,
+  user: User
+) {
+  const selfTier = season.self?.tier ?? "UNRANKED";
+  const selfPoints = season.self?.points ?? 0;
+  const selfRank = season.selfRank ?? null;
+  const selfLine = selfRank
+    ? `Your Season Rank: **#${selfRank}**`
+    : "Your Season Rank: **Unranked**";
+
+  return new EmbedBuilder()
+    .setColor(0xf72585)
+    .setAuthor({
+      name: `${user.displayName}'s Sim Season`,
+      iconURL: user.displayAvatarURL()
+    })
+    .setDescription(
+      [
+        `Season: **${season.seasonKey}**`,
+        `Ends: <t:${Math.floor(season.seasonEndsAt.getTime() / 1000)}:R>`,
+        `${selfLine}`,
+        `Tier: ${ladderTierEmoji(selfTier as SimulationLadderTier)} **${selfTier}** • Points: \`${selfPoints}\``,
+        `Active Couples: **${season.totalCouples}**`
+      ].join("\n")
+    )
+    .setFooter({ text: "Team Tatsui ❤️" });
+}
+
+export function buildFamilySimulationSeasonClaimEmbed(
+  claim: Awaited<ReturnType<typeof claimFamilySimulationSeasonRewards>>,
+  user: User
+) {
+  return new EmbedBuilder()
+    .setColor(0x15ff00)
+    .setAuthor({
+      name: `${user.displayName}'s Season Rewards`,
+      iconURL: user.displayAvatarURL()
+    })
+    .setDescription(
+      [
+        `Season Claimed: **${claim.seasonKey}**`,
+        `Tier: ${ladderTierEmoji(claim.tier as SimulationLadderTier)} **${claim.tier}**`,
+        claim.rank ? `Final Rank: **#${claim.rank}**` : "Final Rank: **Unranked**",
+        "",
+        `+${claim.rewards.xp} XP • +${claim.rewards.coins} coins • +${claim.rewards.bondXp} bond XP`
+      ].join("\n")
+    )
+    .setFooter({ text: "Team Tatsui ❤️" });
+}
+
+export function buildFamilySimulationAdminResultEmbed(input: {
+  user: User;
+  title: string;
+  seasonKey: string;
+  touched: number;
+  note: string;
+}) {
+  return new EmbedBuilder()
+    .setColor(0xf59e0b)
+    .setAuthor({
+      name: `${input.user.displayName} • Simulation Admin`,
+      iconURL: input.user.displayAvatarURL()
+    })
+    .setTitle(input.title)
+    .setDescription(
+      [
+        `Season Key: **${input.seasonKey}**`,
+        `Couples Updated: **${input.touched}**`,
+        input.note
+      ].join("\n")
+    )
+    .setFooter({ text: "Admin action logged in family moderation logs." });
+}
+
+export function buildFamilyModerationAuditEmbed(
+  audit: Awaited<ReturnType<typeof getFamilyModerationAudit>>,
+  user: User
+) {
+  const logsText =
+    audit.logs.length > 0
+      ? audit.logs
+          .map((l: any, i: number) => {
+            const ts = Math.floor(new Date(l.createdAt).getTime() / 1000);
+            return `\`${i + 1}.\` [${l.severity}] **${l.action}** • <t:${ts}:R>`;
+          })
+          .join("\n")
+      : "No moderation logs yet.";
+  const flagsText =
+    audit.activeFlags.length > 0
+      ? audit.activeFlags
+          .map((f: any, i: number) => {
+            const ts = Math.floor(new Date(f.createdAt).getTime() / 1000);
+            return `\`${i + 1}.\` **${f.flagType}** • score \`${f.penaltyScore}\` • <t:${ts}:R>`;
+          })
+          .join("\n")
+      : "No active penalty flags.";
+
+  return new EmbedBuilder()
+    .setColor(0xf59e0b)
+    .setAuthor({
+      name: `${user.displayName}'s Family Moderation Audit`,
+      iconURL: user.displayAvatarURL()
+    })
+    .setDescription(
+      [
+        "Admin-only visibility for anti-abuse actions and active penalty flags.",
+        typeof (audit as { autoResolved?: number }).autoResolved === "number"
+          ? `Auto-Resolved This Fetch: **${(audit as { autoResolved?: number }).autoResolved ?? 0}**`
+          : null
+      ]
+        .filter(Boolean)
+        .join("\n")
+    )
+    .addFields(
+      { name: "Recent Moderation Logs", value: logsText },
+      { name: "Active Penalty Flags", value: flagsText }
+    )
     .setFooter({ text: "Team Tatsui ❤️" });
 }
 
@@ -2594,6 +3910,7 @@ export async function handleFamilyProposalButton(interaction: ButtonInteraction)
   if (prefix !== "family" || kind !== "proposal" || !proposalId || !action) return false;
 
   try {
+    await interaction.deferUpdate();
     const result = await respondProposal({
       proposalId,
       actorUserId: interaction.user.id,
@@ -2603,7 +3920,7 @@ export async function handleFamilyProposalButton(interaction: ButtonInteraction)
 
     if (!result.accepted) {
       try {
-        await interaction.update({
+        await interaction.editReply({
           embeds: [
             new EmbedBuilder()
               .setColor(0xf72585)
@@ -2630,7 +3947,7 @@ export async function handleFamilyProposalButton(interaction: ButtonInteraction)
         : `🏡 || <@${result.proposal.toUserId}>, Yay! <@${result.proposal.fromUserId}> is now your Sibling. Congrats!!`;
 
     try {
-      await interaction.update({
+      await interaction.editReply({
         embeds: [
           new EmbedBuilder()
             .setColor(0xf72585)
@@ -2666,12 +3983,16 @@ export async function handleFamilyProposalButton(interaction: ButtonInteraction)
       } as const;
 
       if (isExpiry && interaction.isButton()) {
-        await interaction.update({
+        await interaction.editReply({
           embeds: payload.embeds,
           components: timeoutComponents()
         });
       } else {
-        await interaction.reply(payload);
+        if (interaction.deferred || interaction.replied) {
+          await interaction.followUp(payload);
+        } else {
+          await interaction.reply(payload);
+        }
       }
     } catch (replyError) {
       if (!isUnknownInteractionError(replyError)) throw replyError;
@@ -2873,13 +4194,20 @@ export async function handleFamilySimulationPanelButton(interaction: ButtonInter
   }
 
   try {
+    await interaction.deferUpdate();
+  } catch (error) {
+    if (!isUnknownInteractionError(error)) throw error;
+    return true;
+  }
+
+  try {
     if (action === "run") {
       const result = await awardFamilySimulationInteraction({
         userId: interaction.user.id,
         guildId: interaction.guildId,
         username: interaction.user.username
       });
-      await interaction.update({
+      await interaction.editReply({
         embeds: [buildFamilySimulationResultEmbed(result, interaction.user)],
         components: buildFamilySimulationPanelComponents(interaction.user.id)
       });
@@ -2888,14 +4216,14 @@ export async function handleFamilySimulationPanelButton(interaction: ButtonInter
 
     const stats = await getFamilySimulationAnalytics(interaction.user.id);
     if (action === "stats") {
-      await interaction.update({
+      await interaction.editReply({
         embeds: [buildFamilySimulationStatsEmbed(stats, interaction.user)],
         components: buildFamilySimulationPanelComponents(interaction.user.id)
       });
       return true;
     }
     if (action === "recent") {
-      await interaction.update({
+      await interaction.editReply({
         embeds: [buildFamilySimulationRecentEmbed(stats, interaction.user)],
         components: buildFamilySimulationPanelComponents(interaction.user.id)
       });
@@ -2903,7 +4231,7 @@ export async function handleFamilySimulationPanelButton(interaction: ButtonInter
     }
     if (action === "milestones") {
       const board = await getFamilySimulationMilestoneBoard(interaction.user.id);
-      await interaction.update({
+      await interaction.editReply({
         embeds: [buildFamilySimulationMilestonesEmbed(board, interaction.user)],
         components: buildFamilySimulationPanelComponents(interaction.user.id)
       });
@@ -2911,7 +4239,7 @@ export async function handleFamilySimulationPanelButton(interaction: ButtonInter
     }
     if (action === "ladder") {
       const ladder = await getFamilySimulationLadder({ userId: interaction.user.id, limit: 10 });
-      await interaction.update({
+      await interaction.editReply({
         embeds: [buildFamilySimulationLadderEmbed(ladder, interaction.user)],
         components: buildFamilySimulationPanelComponents(interaction.user.id)
       });
@@ -2947,6 +4275,254 @@ export async function handleFamilySimulationPanelButton(interaction: ButtonInter
     }
     return true;
   }
+}
+
+export async function handleFamilySimulationAdminPanelButton(interaction: ButtonInteraction) {
+  const [prefix, kind, controllerId, action] = interaction.customId.split(":");
+  if (prefix !== "family" || kind !== "simadminpanel" || !controllerId || !action) return false;
+
+  if (interaction.user.id !== controllerId) {
+    try {
+      await interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0xf72585)
+            .setDescription("Only the command invoker can control this admin panel.")
+            .setFooter({ text: "Team Tatsui ❤️" })
+        ],
+        flags: MessageFlags.Ephemeral
+      });
+    } catch (error) {
+      if (!isUnknownInteractionError(error)) throw error;
+    }
+    return true;
+  }
+
+  if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+    try {
+      await interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0xf72585)
+            .setDescription("You need `Manage Server` to use this admin panel.")
+            .setFooter({ text: "Team Tatsui ❤️" })
+        ],
+        flags: MessageFlags.Ephemeral
+      });
+    } catch (error) {
+      if (!isUnknownInteractionError(error)) throw error;
+    }
+    return true;
+  }
+
+  if (action !== "audit" && action !== "clear") {
+    try {
+      await interaction.deferUpdate();
+    } catch (error) {
+      if (!isUnknownInteractionError(error)) throw error;
+      return true;
+    }
+  }
+
+  try {
+    if (action === "start") {
+      const result = await adminForceStartFamilySimulationSeason({
+        adminUserId: interaction.user.id,
+        guildId: interaction.guildId
+      });
+      await interaction.editReply({
+        embeds: [
+          buildFamilySimulationAdminResultEmbed({
+            user: interaction.user,
+            title: "✅ Season Force Started",
+            seasonKey: result.seasonKey,
+            touched: result.touched,
+            note: "All active couples were moved into this season with ladder reset to fresh."
+          })
+        ],
+        components: buildFamilySimulationAdminPanelComponents(interaction.user.id)
+      });
+      return true;
+    }
+    if (action === "end") {
+      const result = await adminForceEndFamilySimulationSeason({
+        adminUserId: interaction.user.id,
+        guildId: interaction.guildId
+      });
+      await interaction.editReply({
+        embeds: [
+          buildFamilySimulationAdminResultEmbed({
+            user: interaction.user,
+            title: "🛑 Season Force Ended",
+            seasonKey: result.seasonKey,
+            touched: result.touched,
+            note: "Couples were shifted off active week key so rewards can be claimable immediately."
+          })
+        ],
+        components: buildFamilySimulationAdminPanelComponents(interaction.user.id)
+      });
+      return true;
+    }
+    if (action === "reset") {
+      const result = await adminResetFamilySimulationLadder({
+        adminUserId: interaction.user.id,
+        guildId: interaction.guildId
+      });
+      await interaction.editReply({
+        embeds: [
+          buildFamilySimulationAdminResultEmbed({
+            user: interaction.user,
+            title: "♻️ Ladder Reset Complete",
+            seasonKey: result.seasonKey,
+            touched: result.touched,
+            note: "Points/tier/reward-mask were reset for all active couples."
+          })
+        ],
+        components: buildFamilySimulationAdminPanelComponents(interaction.user.id)
+      });
+      return true;
+    }
+    if (action === "recompute") {
+      const result = await adminRecomputeFamilySimulationLadder({
+        adminUserId: interaction.user.id,
+        guildId: interaction.guildId
+      });
+      await interaction.editReply({
+        embeds: [
+          buildFamilySimulationAdminResultEmbed({
+            user: interaction.user,
+            title: "🧮 Ladder Recomputed",
+            seasonKey: result.seasonKey,
+            touched: result.touched,
+            note: "Tier buckets were recomputed from current season points."
+          })
+        ],
+        components: buildFamilySimulationAdminPanelComponents(interaction.user.id)
+      });
+      return true;
+    }
+    if (action === "audit") {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      const audit = await getFamilyModerationAudit({ guildId: interaction.guildId, limit: 10 });
+      if (!audit.supported) {
+        await interaction.editReply({
+          embeds: [
+            new EmbedBuilder()
+              .setColor(0xf72585)
+              .setDescription("Audit tables are not available yet. Run Prisma push/migrate first.")
+              .setFooter({ text: "Team Tatsui ❤️" })
+          ]
+        });
+        return true;
+      }
+      await interaction.editReply({
+        embeds: [buildFamilyModerationAuditEmbed(audit, interaction.user)]
+      });
+      return true;
+    }
+    if (action === "clear") {
+      const modalId = `family:simadminpanel:clear:${interaction.user.id}`;
+      const modal = new ModalBuilder().setCustomId(modalId).setTitle("Clear Penalty Flags");
+      const reasonInput = new TextInputBuilder()
+        .setCustomId("reason")
+        .setLabel("Reason")
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true)
+        .setMaxLength(120)
+        .setPlaceholder("Why are you clearing active penalties?");
+      const noteInput = new TextInputBuilder()
+        .setCustomId("note")
+        .setLabel("Note (optional)")
+        .setStyle(TextInputStyle.Paragraph)
+        .setRequired(false)
+        .setMaxLength(500)
+        .setPlaceholder("Additional moderation context");
+      modal.addComponents(
+        new ActionRowBuilder<TextInputBuilder>().addComponents(reasonInput),
+        new ActionRowBuilder<TextInputBuilder>().addComponents(noteInput)
+      );
+      await interaction.showModal(modal);
+      let submitted: ChatInputCommandInteraction | any;
+      try {
+        submitted = await interaction.awaitModalSubmit({
+          time: 120_000,
+          filter: (i) => i.customId === modalId && i.user.id === interaction.user.id
+        });
+      } catch {
+        return true;
+      }
+      const reason = submitted.fields.getTextInputValue("reason")?.trim() || "No reason provided";
+      const note = submitted.fields.getTextInputValue("note")?.trim() || null;
+      await submitted.deferReply({ flags: MessageFlags.Ephemeral });
+      const result = await adminClearFamilyPenaltyFlags({
+        adminUserId: interaction.user.id,
+        guildId: interaction.guildId,
+        clearAll: true,
+        reason,
+        note
+      });
+      if (!result.supported) {
+        await submitted.editReply({
+          embeds: [
+            new EmbedBuilder()
+              .setColor(0xf72585)
+              .setDescription("Penalty tables are not available yet. Run Prisma push/migrate first.")
+              .setFooter({ text: "Team Tatsui ❤️" })
+          ]
+        });
+        return true;
+      }
+      await submitted.editReply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0xf59e0b)
+            .setTitle("🧹 Panel Penalty Clear Complete")
+            .setDescription(
+              [
+                `Cleared: **${result.cleared}**`,
+                `Matched: **${result.matched}**`,
+                `Auto-Resolved: **${result.autoResolved ?? 0}**`,
+                `Reason: **${reason}**`,
+                note ? `Note: ${note}` : null
+              ]
+                .filter(Boolean)
+                .join("\n")
+            )
+            .setFooter({ text: "Team Tatsui ❤️" })
+        ]
+      });
+      return true;
+    }
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : "Admin panel update failed.";
+    try {
+      if (interaction.deferred || interaction.replied) {
+        await interaction.editReply({
+          embeds: [
+            new EmbedBuilder()
+              .setColor(0xf72585)
+              .setDescription(msg)
+              .setFooter({ text: "Team Tatsui ❤️" })
+          ]
+        });
+      } else {
+        await interaction.reply({
+          embeds: [
+            new EmbedBuilder()
+              .setColor(0xf72585)
+              .setDescription(msg)
+              .setFooter({ text: "Team Tatsui ❤️" })
+          ],
+          flags: MessageFlags.Ephemeral
+        });
+      }
+    } catch (replyError) {
+      if (!isUnknownInteractionError(replyError)) throw replyError;
+    }
+    return true;
+  }
+
+  return false;
 }
 
 export function ensureFamilyEnabledOrThrow(settings: Awaited<ReturnType<typeof getFamilySettings>>) {

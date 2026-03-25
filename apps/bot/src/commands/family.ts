@@ -1,9 +1,32 @@
-import { EmbedBuilder, MessageFlags, SlashCommandBuilder } from "discord.js";
+import {
+  ActionRowBuilder,
+  EmbedBuilder,
+  MessageFlags,
+  ModalBuilder,
+  PermissionFlagsBits,
+  SlashCommandBuilder,
+  TextInputBuilder,
+  TextInputStyle
+} from "discord.js";
 import type { SlashCommand } from "../types/command.js";
 import {
   awardDateInteraction,
   awardFamilySimulationInteraction,
+  awardFamilySimulationDuel,
+  adminForceEndFamilySimulationSeason,
+  adminForceStartFamilySimulationSeason,
+  adminRecomputeFamilySimulationLadder,
+  adminResetFamilySimulationLadder,
+  adminClearFamilyPenaltyFlags,
+  buildFamilySimulationDuelHistoryEmbed,
+  buildFamilySimulationDuelResultEmbed,
+  buildFamilySimulationAdminResultEmbed,
+  buildFamilySimulationAdminPanelEmbed,
+  buildFamilySimulationAdminPanelComponents,
   buildFamilySimulationLadderEmbed,
+  buildFamilyModerationAuditEmbed,
+  buildFamilySimulationSeasonClaimEmbed,
+  buildFamilySimulationSeasonOverviewEmbed,
   buildFamilySimulationMilestonesEmbed,
   buildFamilySimulationPanelComponents,
   buildFamilySimulationRecentEmbed,
@@ -26,6 +49,10 @@ import {
   getFamilyAchievements,
   getFamilySimulationAnalytics,
   getFamilySimulationLadder,
+  getFamilySimulationDuelHistory,
+  getFamilyModerationAudit,
+  getFamilySimulationSeasonOverview,
+  claimFamilySimulationSeasonRewards,
   getFamilySimulationMilestoneBoard,
   buildFamilyQuestClaimComponents,
   scheduleProposalTimeout,
@@ -307,6 +334,341 @@ const familySimLadderCommand: SlashCommand = {
     await interaction.editReply({
       embeds: [buildFamilySimulationLadderEmbed(ladder, interaction.user)],
       components: buildFamilySimulationPanelComponents(interaction.user.id)
+    });
+  }
+};
+
+const familySimDuelCommand: SlashCommand = {
+  data: new SlashCommandBuilder()
+    .setName("familysimduel")
+    .setDescription("Duel another active couple in simulation ladder.")
+    .addUserOption((o) => o.setName("user").setDescription("A member of target couple").setRequired(true)),
+  async execute(interaction) {
+    const settings = await getFamilySettings(interaction.guildId);
+    ensureFamilyEnabledOrThrow(settings);
+    ensureMarriageEnabledOrThrow(settings);
+    const target = interaction.options.getUser("user", true);
+    const duel = await awardFamilySimulationDuel({
+      userId: interaction.user.id,
+      opponentUserId: target.id,
+      guildId: interaction.guildId,
+      username: interaction.user.username
+    });
+    await interaction.reply({
+      embeds: [buildFamilySimulationDuelResultEmbed(duel, interaction.user)],
+      components: buildFamilySimulationPanelComponents(interaction.user.id)
+    });
+  }
+};
+
+const familySimDuelHistoryCommand: SlashCommand = {
+  data: new SlashCommandBuilder()
+    .setName("familysimduelhistory")
+    .setDescription("View recent simulation duel history."),
+  async execute(interaction) {
+    const settings = await getFamilySettings(interaction.guildId);
+    ensureFamilyEnabledOrThrow(settings);
+    ensureMarriageEnabledOrThrow(settings);
+    const history = await getFamilySimulationDuelHistory({ userId: interaction.user.id, limit: 10 });
+    await interaction.reply({
+      embeds: [buildFamilySimulationDuelHistoryEmbed(history, interaction.user)],
+      components: buildFamilySimulationPanelComponents(interaction.user.id)
+    });
+  }
+};
+
+const familySimSeasonCommand: SlashCommand = {
+  data: new SlashCommandBuilder()
+    .setName("familysimseason")
+    .setDescription("View current simulation season overview."),
+  async execute(interaction) {
+    const settings = await getFamilySettings(interaction.guildId);
+    ensureFamilyEnabledOrThrow(settings);
+    ensureMarriageEnabledOrThrow(settings);
+    const season = await getFamilySimulationSeasonOverview({ userId: interaction.user.id, limit: 10 });
+    await interaction.reply({
+      embeds: [buildFamilySimulationSeasonOverviewEmbed(season, interaction.user)],
+      components: buildFamilySimulationPanelComponents(interaction.user.id)
+    });
+  }
+};
+
+const familySimSeasonClaimCommand: SlashCommand = {
+  data: new SlashCommandBuilder()
+    .setName("familysimseasonclaim")
+    .setDescription("Claim previous season simulation rewards."),
+  async execute(interaction) {
+    const settings = await getFamilySettings(interaction.guildId);
+    ensureFamilyEnabledOrThrow(settings);
+    ensureMarriageEnabledOrThrow(settings);
+    const claim = await claimFamilySimulationSeasonRewards({
+      userId: interaction.user.id,
+      guildId: interaction.guildId
+    });
+    await interaction.reply({
+      embeds: [buildFamilySimulationSeasonClaimEmbed(claim, interaction.user)],
+      components: buildFamilySimulationPanelComponents(interaction.user.id)
+    });
+  }
+};
+
+const familySimSeasonStartAdminCommand: SlashCommand = {
+  data: new SlashCommandBuilder()
+    .setName("familysimseasonstart")
+    .setDescription("Admin: force start/reset simulation season.")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .addStringOption((o) => o.setName("season_key").setDescription("Optional manual season key (e.g., 2026-W12)")),
+  async execute(interaction) {
+    const seasonKey = interaction.options.getString("season_key") ?? undefined;
+    const result = await adminForceStartFamilySimulationSeason({
+      adminUserId: interaction.user.id,
+      guildId: interaction.guildId,
+      seasonKey
+    });
+    await interaction.reply({
+      embeds: [
+        buildFamilySimulationAdminResultEmbed({
+          user: interaction.user,
+          title: "✅ Season Force Started",
+          seasonKey: result.seasonKey,
+          touched: result.touched,
+          note: "All active couples were moved into this season with ladder reset to fresh."
+        })
+      ]
+    });
+  }
+};
+
+const familySimSeasonEndAdminCommand: SlashCommand = {
+  data: new SlashCommandBuilder()
+    .setName("familysimseasonend")
+    .setDescription("Admin: force end current simulation season.")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .addStringOption((o) => o.setName("season_key").setDescription("Optional key to archive as ended season")),
+  async execute(interaction) {
+    const seasonKey = interaction.options.getString("season_key") ?? undefined;
+    const result = await adminForceEndFamilySimulationSeason({
+      adminUserId: interaction.user.id,
+      guildId: interaction.guildId,
+      seasonKey
+    });
+    await interaction.reply({
+      embeds: [
+        buildFamilySimulationAdminResultEmbed({
+          user: interaction.user,
+          title: "🛑 Season Force Ended",
+          seasonKey: result.seasonKey,
+          touched: result.touched,
+          note: "Couples were shifted off active week key so rewards can be claimable immediately."
+        })
+      ]
+    });
+  }
+};
+
+const familySimLadderResetAdminCommand: SlashCommand = {
+  data: new SlashCommandBuilder()
+    .setName("familysimladderreset")
+    .setDescription("Admin: reset simulation ladder points.")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .addStringOption((o) => o.setName("season_key").setDescription("Optional season key to reset under")),
+  async execute(interaction) {
+    const seasonKey = interaction.options.getString("season_key") ?? undefined;
+    const result = await adminResetFamilySimulationLadder({
+      adminUserId: interaction.user.id,
+      guildId: interaction.guildId,
+      seasonKey
+    });
+    await interaction.reply({
+      embeds: [
+        buildFamilySimulationAdminResultEmbed({
+          user: interaction.user,
+          title: "♻️ Ladder Reset Complete",
+          seasonKey: result.seasonKey,
+          touched: result.touched,
+          note: "Points/tier/reward-mask were reset for all active couples."
+        })
+      ]
+    });
+  }
+};
+
+const familySimLadderRecomputeAdminCommand: SlashCommand = {
+  data: new SlashCommandBuilder()
+    .setName("familysimladderrecompute")
+    .setDescription("Admin: recompute ladder tiers from current points.")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .addStringOption((o) => o.setName("season_key").setDescription("Optional season key to recompute under")),
+  async execute(interaction) {
+    const seasonKey = interaction.options.getString("season_key") ?? undefined;
+    const result = await adminRecomputeFamilySimulationLadder({
+      adminUserId: interaction.user.id,
+      guildId: interaction.guildId,
+      seasonKey
+    });
+    await interaction.reply({
+      embeds: [
+        buildFamilySimulationAdminResultEmbed({
+          user: interaction.user,
+          title: "🧮 Ladder Recomputed",
+          seasonKey: result.seasonKey,
+          touched: result.touched,
+          note: "Tier buckets were recomputed from current season points."
+        })
+      ]
+    });
+  }
+};
+
+const familySimModerationAuditCommand: SlashCommand = {
+  data: new SlashCommandBuilder()
+    .setName("familysimaudit")
+    .setDescription("Admin: view simulation anti-abuse logs and active flags.")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .addIntegerOption((o) =>
+      o.setName("limit").setDescription("How many rows to show (1-25)").setMinValue(1).setMaxValue(25)
+    ),
+  async execute(interaction) {
+    const limit = interaction.options.getInteger("limit") ?? 10;
+    const audit = await getFamilyModerationAudit({ guildId: interaction.guildId, limit });
+    if (!audit.supported) {
+      await interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0xf72585)
+            .setDescription("Audit tables are not available yet. Run Prisma push/migrate first.")
+            .setFooter({ text: "Team Tatsui ❤️" })
+        ],
+        flags: MessageFlags.Ephemeral
+      });
+      return;
+    }
+    await interaction.reply({
+      embeds: [buildFamilyModerationAuditEmbed(audit, interaction.user)],
+      flags: MessageFlags.Ephemeral
+    });
+  }
+};
+
+const familySimPenaltyClearCommand: SlashCommand = {
+  data: new SlashCommandBuilder()
+    .setName("familysimpenaltyclear")
+    .setDescription("Admin: clear active anti-abuse penalty flags.")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .addStringOption((o) => o.setName("flag_id").setDescription("Specific penalty flag id"))
+    .addUserOption((o) => o.setName("user").setDescription("Clear all active flags for this user"))
+    .addStringOption((o) => o.setName("relationship_id").setDescription("Clear by relationship id"))
+    .addBooleanOption((o) => o.setName("all").setDescription("Clear all active flags in this guild")),
+  async execute(interaction) {
+    const flagId = interaction.options.getString("flag_id") ?? undefined;
+    const userId = interaction.options.getUser("user")?.id;
+    const relationshipId = interaction.options.getString("relationship_id") ?? undefined;
+    const clearAll = interaction.options.getBoolean("all") ?? false;
+    const filterOk = clearAll || flagId || userId || relationshipId;
+    if (!filterOk) {
+      await interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0xf72585)
+            .setDescription("Provide a target: `all`, `flag_id`, `user`, or `relationship_id`.")
+            .setFooter({ text: "Team Tatsui ❤️" })
+        ],
+        flags: MessageFlags.Ephemeral
+      });
+      return;
+    }
+
+    const modalId = `familysimpenaltyclear:${flagId ?? "-"}:${userId ?? "-"}:${relationshipId ?? "-"}:${clearAll ? "1" : "0"}`;
+    const modal = new ModalBuilder()
+      .setCustomId(modalId)
+      .setTitle("Clear Penalty Flags");
+    const reasonInput = new TextInputBuilder()
+      .setCustomId("reason")
+      .setLabel("Reason")
+      .setStyle(TextInputStyle.Short)
+      .setRequired(true)
+      .setMaxLength(120)
+      .setPlaceholder("Why are you clearing these penalties?");
+    const noteInput = new TextInputBuilder()
+      .setCustomId("note")
+      .setLabel("Note (optional)")
+      .setStyle(TextInputStyle.Paragraph)
+      .setRequired(false)
+      .setMaxLength(500)
+      .setPlaceholder("Extra moderation context (optional)");
+
+    modal.addComponents(
+      new ActionRowBuilder<TextInputBuilder>().addComponents(reasonInput),
+      new ActionRowBuilder<TextInputBuilder>().addComponents(noteInput)
+    );
+    await interaction.showModal(modal);
+
+    let submitted;
+    try {
+      submitted = await interaction.awaitModalSubmit({
+        time: 120_000,
+        filter: (i) => i.customId === modalId && i.user.id === interaction.user.id
+      });
+    } catch {
+      return;
+    }
+
+    const reason = submitted.fields.getTextInputValue("reason")?.trim() || "No reason provided";
+    const note = submitted.fields.getTextInputValue("note")?.trim() || null;
+    await submitted.deferReply({ flags: MessageFlags.Ephemeral });
+    const result = await adminClearFamilyPenaltyFlags({
+      adminUserId: interaction.user.id,
+      guildId: interaction.guildId,
+      flagId,
+      userId,
+      relationshipId,
+      clearAll,
+      reason,
+      note
+    });
+    if (!result.supported) {
+      await submitted.editReply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0xf72585)
+            .setDescription("Penalty tables are not available yet. Run Prisma push/migrate first.")
+            .setFooter({ text: "Team Tatsui ❤️" })
+        ]
+      });
+      return;
+    }
+    await submitted.editReply({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0xf59e0b)
+          .setTitle("🧹 Penalty Flags Cleared")
+          .setDescription(
+            [
+              `Cleared: **${result.cleared}**`,
+              `Matched: **${result.matched}**`,
+              `Auto-Resolved: **${result.autoResolved ?? 0}**`,
+              `Reason: **${reason}**`,
+              note ? `Note: ${note}` : null
+            ]
+              .filter(Boolean)
+              .join("\n")
+          )
+          .setFooter({ text: "Team Tatsui ❤️" })
+      ]
+    });
+  }
+};
+
+const familySimAdminPanelCommand: SlashCommand = {
+  data: new SlashCommandBuilder()
+    .setName("familysimadminpanel")
+    .setDescription("Admin: open simulation operations panel.")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
+  async execute(interaction) {
+    await interaction.reply({
+      embeds: [buildFamilySimulationAdminPanelEmbed(interaction.user)],
+      components: buildFamilySimulationAdminPanelComponents(interaction.user.id),
+      flags: MessageFlags.Ephemeral
     });
   }
 };
@@ -723,6 +1085,17 @@ export const familyCommands: SlashCommand[] = [
   familySimStatsCommand,
   familySimMilestonesCommand,
   familySimLadderCommand,
+  familySimDuelCommand,
+  familySimDuelHistoryCommand,
+  familySimSeasonCommand,
+  familySimSeasonClaimCommand,
+  familySimSeasonStartAdminCommand,
+  familySimSeasonEndAdminCommand,
+  familySimLadderResetAdminCommand,
+  familySimLadderRecomputeAdminCommand,
+  familySimModerationAuditCommand,
+  familySimPenaltyClearCommand,
+  familySimAdminPanelCommand,
   familySimPanelCommand,
   anniversaryCommand,
   anniversaryClaimCommand,

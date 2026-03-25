@@ -17,9 +17,24 @@ import {
 import { buildHelpMessage } from "./help-view.js";
 import { getCurrentFamilyEvent } from "./family-events.js";
 import {
+  awardPartnerActionBond,
   awardDateInteraction,
   awardFamilySimulationInteraction,
+  awardFamilySimulationDuel,
+  adminForceEndFamilySimulationSeason,
+  adminForceStartFamilySimulationSeason,
+  adminRecomputeFamilySimulationLadder,
+  adminResetFamilySimulationLadder,
+  adminClearFamilyPenaltyFlags,
+  buildFamilyModerationAuditEmbed,
+  buildFamilySimulationAdminResultEmbed,
+  buildFamilySimulationAdminPanelComponents,
+  buildFamilySimulationAdminPanelEmbed,
+  buildFamilySimulationDuelHistoryEmbed,
+  buildFamilySimulationDuelResultEmbed,
   buildFamilySimulationLadderEmbed,
+  buildFamilySimulationSeasonClaimEmbed,
+  buildFamilySimulationSeasonOverviewEmbed,
   buildFamilySimulationMilestonesEmbed,
   buildFamilySimulationPanelComponents,
   buildFamilySimulationRecentEmbed,
@@ -40,7 +55,11 @@ import {
   getFamilyQuestBoard,
   getFamilyAchievements,
   getFamilySimulationAnalytics,
+  getFamilySimulationDuelHistory,
+  getFamilyModerationAudit,
   getFamilySimulationLadder,
+  getFamilySimulationSeasonOverview,
+  claimFamilySimulationSeasonRewards,
   getFamilySimulationMilestoneBoard,
   getRelationshipIdentity,
   getFamilySettings,
@@ -73,7 +92,7 @@ import {
   petPetFromAvatarUrl
 } from "./rich-media.js";
 import { getAvatarUrl } from "./user-avatar.js";
-import { callWeebyCustom, callWeebyGenerator, callWeebyOverlay, weebyAttachment } from "./weeby.js";
+import { callWeebyCustom, callWeebyGenerator, callWeebyGif, callWeebyOverlay, weebyAttachment } from "./weeby.js";
 import {
   buyRelationshipItem,
   getActiveRelationshipEffects,
@@ -117,6 +136,15 @@ const BASE_PREFIX_COMMANDS = [
   "dog",
   "cat",
   "poke",
+  "hug",
+  "pat",
+  "kiss",
+  "cuddle",
+  "slap",
+  "highfive",
+  "bonk",
+  "tickle",
+  "wink",
   "owo",
   "dare",
   "truth",
@@ -137,6 +165,17 @@ const BASE_PREFIX_COMMANDS = [
   "familysimstats",
   "familysimmilestones",
   "familysimladder",
+  "familysimduel",
+  "familysimduelhistory",
+  "familysimseason",
+  "familysimseasonclaim",
+  "familysimseasonstart",
+  "familysimseasonend",
+  "familysimladderreset",
+  "familysimladderrecompute",
+  "familysimaudit",
+  "familysimpenaltyclear",
+  "familysimadminpanel",
   "familysimpanel",
   "anniversary",
   "anniversaryclaim",
@@ -254,6 +293,32 @@ function parseEmoji(input: string) {
   const id = match[2] ?? "";
   const ext = animated ? "gif" : "png";
   return { id, name, animated, url: `https://cdn.discordapp.com/emojis/${id}.${ext}?size=1024` };
+}
+
+function waitForUserMessage(input: {
+  source: Message;
+  userId: string;
+  timeoutMs: number;
+}) {
+  return new Promise<Message | null>((resolve) => {
+    const channelId = input.source.channelId;
+    const onMessage = (m: Message) => {
+      if (m.author.bot) return;
+      if (m.author.id !== input.userId) return;
+      if (m.channelId !== channelId) return;
+      cleanup();
+      resolve(m);
+    };
+    const cleanup = () => {
+      clearTimeout(timer);
+      input.source.client.off("messageCreate", onMessage);
+    };
+    const timer = setTimeout(() => {
+      cleanup();
+      resolve(null);
+    }, input.timeoutMs);
+    input.source.client.on("messageCreate", onMessage);
+  });
 }
 
 async function fetchImage(url: string) {
@@ -387,7 +452,63 @@ async function runPoke({ message }: PrefixContext) {
     await message.reply("Please mention someone to poke.");
     return;
   }
-  await message.reply(`${user}, ${message.author.displayName} poked you!!!!`);
+  let gifUrl: string | null = null;
+  try {
+    gifUrl = await callWeebyGif("poke");
+  } catch {
+    gifUrl = null;
+  }
+  await message.reply({
+    embeds: [
+      new EmbedBuilder()
+        .setColor(0xf72585)
+        .setDescription(`${message.author} pokes ${user} ~ OwO`)
+        .setImage(gifUrl)
+        .setFooter({ text: "Team Tatsui ❤️" })
+    ]
+  });
+}
+
+async function runActionGif(
+  message: Message,
+  config: {
+    gifType: string;
+    text: (author: string, target: string) => string;
+    partnerBondAction?: "hug" | "pat" | "kiss" | "cuddle";
+  }
+) {
+  const target = message.mentions.users.first() ?? message.author;
+  let gifUrl: string | null = null;
+  try {
+    gifUrl = await callWeebyGif(config.gifType);
+  } catch {
+    gifUrl = null;
+  }
+  let partnerBonusLine: string | null = null;
+  if (config.partnerBondAction) {
+    const bonus = await awardPartnerActionBond({
+      userId: message.author.id,
+      targetUserId: target.id,
+      guildId: message.guildId,
+      action: config.partnerBondAction
+    });
+    if (bonus?.applied) {
+      partnerBonusLine = `💞 Partner Bonus: +${bonus.rewards.bondXp} bond XP • +${bonus.rewards.bondScore} UwU`;
+    }
+  }
+  await message.reply({
+    embeds: [
+      new EmbedBuilder()
+        .setColor(0xf72585)
+        .setDescription(
+          [config.text(`${message.author}`, `${target}`), partnerBonusLine]
+            .filter(Boolean)
+            .join("\n")
+        )
+        .setImage(gifUrl)
+        .setFooter({ text: "Team Tatsui ❤️" })
+    ]
+  });
 }
 
 async function runOwo({ message, args }: PrefixContext) {
@@ -1049,6 +1170,12 @@ async function runFamily({ message, args }: PrefixContext) {
       .setTitle(`👪 ${title}`)
       .setDescription(`Try: \`${hint}\``)
       .setFooter({ text: "Team Tatsui ❤️" });
+  const adminOnlyEmbed = () =>
+    new EmbedBuilder()
+      .setColor(0xf72585)
+      .setTitle("🚫 Permission Required")
+      .setDescription("You need `Manage Server` to use this command.")
+      .setFooter({ text: "Team Tatsui ❤️" });
 
   if (!sub) {
     await message.reply({
@@ -1065,6 +1192,17 @@ async function runFamily({ message, args }: PrefixContext) {
               "`family familysimstats`",
               "`family familysimmilestones`",
               "`family familysimladder`",
+              "`family familysimduel @user`",
+              "`family familysimduelhistory`",
+              "`family familysimseason`",
+              "`family familysimseasonclaim`",
+              "`family familysimseasonstart [seasonKey]`",
+              "`family familysimseasonend [seasonKey]`",
+              "`family familysimladderreset [seasonKey]`",
+              "`family familysimladderrecompute [seasonKey]`",
+              "`family familysimaudit`",
+              "`family familysimpenaltyclear [all|flag <id>|@user|rel <relationshipId>]`",
+              "`family familysimadminpanel`",
               "`family familysimpanel`",
               "`family profile [@user]`",
               "`family anniversaryclaim`",
@@ -1262,6 +1400,382 @@ async function runFamily({ message, args }: PrefixContext) {
     await message.reply({
       embeds: [buildFamilySimulationLadderEmbed(ladder, message.author)],
       components: buildFamilySimulationPanelComponents(message.author.id)
+    });
+    return;
+  }
+
+  if (sub === "familysimduel" || sub === "simduel" || sub === "duel") {
+    ensureMarriageEnabledOrThrow(settings);
+    const target = message.mentions.users.first();
+    if (!target) {
+      await message.reply({ embeds: [usageEmbed("family familysimduel @user")] });
+      return;
+    }
+    const duel = await awardFamilySimulationDuel({
+      userId: message.author.id,
+      opponentUserId: target.id,
+      guildId: message.guildId,
+      username: message.author.username
+    });
+    await message.reply({
+      embeds: [buildFamilySimulationDuelResultEmbed(duel, message.author)],
+      components: buildFamilySimulationPanelComponents(message.author.id)
+    });
+    return;
+  }
+
+  if (sub === "familysimduelhistory" || sub === "simduelhistory" || sub === "duelhistory") {
+    ensureMarriageEnabledOrThrow(settings);
+    const history = await getFamilySimulationDuelHistory({ userId: message.author.id, limit: 10 });
+    await message.reply({
+      embeds: [buildFamilySimulationDuelHistoryEmbed(history, message.author)],
+      components: buildFamilySimulationPanelComponents(message.author.id)
+    });
+    return;
+  }
+
+  if (sub === "familysimseason" || sub === "simseason" || sub === "season") {
+    ensureMarriageEnabledOrThrow(settings);
+    const season = await getFamilySimulationSeasonOverview({ userId: message.author.id, limit: 10 });
+    await message.reply({
+      embeds: [buildFamilySimulationSeasonOverviewEmbed(season, message.author)],
+      components: buildFamilySimulationPanelComponents(message.author.id)
+    });
+    return;
+  }
+
+  if (sub === "familysimseasonclaim" || sub === "simseasonclaim" || sub === "seasonclaim") {
+    ensureMarriageEnabledOrThrow(settings);
+    const claim = await claimFamilySimulationSeasonRewards({
+      userId: message.author.id,
+      guildId: message.guildId
+    });
+    await message.reply({
+      embeds: [buildFamilySimulationSeasonClaimEmbed(claim, message.author)],
+      components: buildFamilySimulationPanelComponents(message.author.id)
+    });
+    return;
+  }
+
+  if (sub === "familysimseasonstart" || sub === "simseasonstart") {
+    ensureMarriageEnabledOrThrow(settings);
+    if (!isManageGuild(message)) {
+      await message.reply({ embeds: [adminOnlyEmbed()] });
+      return;
+    }
+    const seasonKey = args[1] ?? undefined;
+    const result = await adminForceStartFamilySimulationSeason({
+      adminUserId: message.author.id,
+      guildId: message.guildId,
+      seasonKey
+    });
+    await message.reply({
+      embeds: [
+        buildFamilySimulationAdminResultEmbed({
+          user: message.author,
+          title: "✅ Season Force Started",
+          seasonKey: result.seasonKey,
+          touched: result.touched,
+          note: "All active couples were moved into this season with ladder reset to fresh."
+        })
+      ]
+    });
+    return;
+  }
+
+  if (sub === "familysimseasonend" || sub === "simseasonend") {
+    ensureMarriageEnabledOrThrow(settings);
+    if (!isManageGuild(message)) {
+      await message.reply({ embeds: [adminOnlyEmbed()] });
+      return;
+    }
+    const seasonKey = args[1] ?? undefined;
+    const result = await adminForceEndFamilySimulationSeason({
+      adminUserId: message.author.id,
+      guildId: message.guildId,
+      seasonKey
+    });
+    await message.reply({
+      embeds: [
+        buildFamilySimulationAdminResultEmbed({
+          user: message.author,
+          title: "🛑 Season Force Ended",
+          seasonKey: result.seasonKey,
+          touched: result.touched,
+          note: "Couples were shifted off active week key so rewards can be claimable immediately."
+        })
+      ]
+    });
+    return;
+  }
+
+  if (sub === "familysimladderreset" || sub === "simladderreset") {
+    ensureMarriageEnabledOrThrow(settings);
+    if (!isManageGuild(message)) {
+      await message.reply({ embeds: [adminOnlyEmbed()] });
+      return;
+    }
+    const seasonKey = args[1] ?? undefined;
+    const result = await adminResetFamilySimulationLadder({
+      adminUserId: message.author.id,
+      guildId: message.guildId,
+      seasonKey
+    });
+    await message.reply({
+      embeds: [
+        buildFamilySimulationAdminResultEmbed({
+          user: message.author,
+          title: "♻️ Ladder Reset Complete",
+          seasonKey: result.seasonKey,
+          touched: result.touched,
+          note: "Points/tier/reward-mask were reset for all active couples."
+        })
+      ]
+    });
+    return;
+  }
+
+  if (sub === "familysimladderrecompute" || sub === "simladderrecompute") {
+    ensureMarriageEnabledOrThrow(settings);
+    if (!isManageGuild(message)) {
+      await message.reply({ embeds: [adminOnlyEmbed()] });
+      return;
+    }
+    const seasonKey = args[1] ?? undefined;
+    const result = await adminRecomputeFamilySimulationLadder({
+      adminUserId: message.author.id,
+      guildId: message.guildId,
+      seasonKey
+    });
+    await message.reply({
+      embeds: [
+        buildFamilySimulationAdminResultEmbed({
+          user: message.author,
+          title: "🧮 Ladder Recomputed",
+          seasonKey: result.seasonKey,
+          touched: result.touched,
+          note: "Tier buckets were recomputed from current season points."
+        })
+      ]
+    });
+    return;
+  }
+
+  if (sub === "familysimaudit" || sub === "simaudit") {
+    ensureMarriageEnabledOrThrow(settings);
+    if (!isManageGuild(message)) {
+      await message.reply({ embeds: [adminOnlyEmbed()] });
+      return;
+    }
+    const audit = await getFamilyModerationAudit({ guildId: message.guildId, limit: 10 });
+    if (!audit.supported) {
+      await message.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0xf72585)
+            .setDescription("Audit tables are not available yet. Run Prisma push/migrate first.")
+            .setFooter({ text: "Team Tatsui ❤️" })
+        ]
+      });
+      return;
+    }
+    await message.reply({
+      embeds: [buildFamilyModerationAuditEmbed(audit, message.author)]
+    });
+    return;
+  }
+
+  if (sub === "familysimpenaltyclear" || sub === "simpenaltyclear") {
+    ensureMarriageEnabledOrThrow(settings);
+    if (!isManageGuild(message)) {
+      await message.reply({ embeds: [adminOnlyEmbed()] });
+      return;
+    }
+    const mode = (args[1] ?? "").toLowerCase();
+    const mention = message.mentions.users.first();
+    const clearAll = mode === "all";
+    const flagId =
+      mode === "flag"
+        ? args[2]
+        : !clearAll && !mention && mode && mode !== "rel" && mode !== "user"
+          ? args[1]
+          : undefined;
+    const relationshipId = mode === "rel" ? args[2] : undefined;
+    const userId = mention?.id ?? (mode === "user" ? args[2] : undefined);
+    if (!clearAll && !flagId && !relationshipId && !userId) {
+      await message.reply({
+        embeds: [
+          usageEmbed(
+            "family familysimpenaltyclear [all|flag <id>|@user|rel <relationshipId>]"
+          )
+        ]
+      });
+      return;
+    }
+    await message.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0xf59e0b)
+          .setTitle("📝 Penalty Clear Reason Required")
+          .setDescription(
+            [
+              "Reply with: `reason | optional note`",
+              "Example: `False positive collusion | reviewed manually by mods`",
+              "Type `cancel` to abort."
+            ].join("\n")
+          )
+          .setFooter({ text: "Waiting 2 minutes for your reply." })
+      ]
+    });
+    const response = await waitForUserMessage({
+      source: message,
+      userId: message.author.id,
+      timeoutMs: 120_000
+    });
+    if (!response) {
+      await message.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0xf72585)
+            .setDescription("Timed out waiting for reason. Penalty clear cancelled.")
+            .setFooter({ text: "Team Tatsui ❤️" })
+        ]
+      });
+      return;
+    }
+    const text = response.content.trim();
+    if (text.toLowerCase() === "cancel") {
+      await message.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0xf72585)
+            .setDescription("Penalty clear cancelled.")
+            .setFooter({ text: "Team Tatsui ❤️" })
+        ]
+      });
+      return;
+    }
+    const [reasonRaw, noteRaw] = text.split("|", 2).map((x: string) => x.trim());
+    if (!reasonRaw) {
+      await message.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0xf72585)
+            .setDescription("Reason is required. Penalty clear cancelled.")
+            .setFooter({ text: "Team Tatsui ❤️" })
+        ]
+      });
+      return;
+    }
+    await message.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0xf59e0b)
+          .setTitle("⚠️ Confirm Penalty Clear")
+          .setDescription(
+            [
+              `Target filter: ${
+                clearAll
+                  ? "`all`"
+                  : flagId
+                    ? `flag \`${flagId}\``
+                    : relationshipId
+                      ? `relationship \`${relationshipId}\``
+                      : userId
+                        ? `<@${userId}>`
+                        : "`unknown`"
+              }`,
+              `Reason: **${reasonRaw}**`,
+              noteRaw ? `Note: ${noteRaw}` : null,
+              "",
+              "Type `YES` to confirm, or `no`/`cancel` to abort."
+            ]
+              .filter(Boolean)
+              .join("\n")
+          )
+          .setFooter({ text: "Waiting 60 seconds for confirmation." })
+      ]
+    });
+    const confirmation = await waitForUserMessage({
+      source: message,
+      userId: message.author.id,
+      timeoutMs: 60_000
+    });
+    if (!confirmation) {
+      await message.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0xf72585)
+            .setDescription("Timed out waiting for confirmation. Penalty clear cancelled.")
+            .setFooter({ text: "Team Tatsui ❤️" })
+        ]
+      });
+      return;
+    }
+    const confirmationText = confirmation.content.trim().toLowerCase();
+    if (confirmationText !== "yes") {
+      await message.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0xf72585)
+            .setDescription("Penalty clear cancelled.")
+            .setFooter({ text: "Team Tatsui ❤️" })
+        ]
+      });
+      return;
+    }
+    const result = await adminClearFamilyPenaltyFlags({
+      adminUserId: message.author.id,
+      guildId: message.guildId,
+      flagId,
+      userId,
+      relationshipId,
+      clearAll,
+      reason: reasonRaw,
+      note: noteRaw || null
+    });
+    if (!result.supported) {
+      await message.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0xf72585)
+            .setDescription("Penalty tables are not available yet. Run Prisma push/migrate first.")
+            .setFooter({ text: "Team Tatsui ❤️" })
+        ]
+      });
+      return;
+    }
+    await message.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0xf59e0b)
+          .setTitle("🧹 Penalty Flags Cleared")
+          .setDescription(
+            [
+              `Cleared: **${result.cleared}**`,
+              `Matched: **${result.matched}**`,
+              `Auto-Resolved: **${result.autoResolved ?? 0}**`,
+              `Reason: **${reasonRaw}**`,
+              noteRaw ? `Note: ${noteRaw}` : null
+            ]
+              .filter(Boolean)
+              .join("\n")
+          )
+          .setFooter({ text: "Team Tatsui ❤️" })
+      ]
+    });
+    return;
+  }
+
+  if (sub === "familysimadminpanel" || sub === "simadminpanel") {
+    ensureMarriageEnabledOrThrow(settings);
+    if (!isManageGuild(message)) {
+      await message.reply({ embeds: [adminOnlyEmbed()] });
+      return;
+    }
+    await message.reply({
+      embeds: [buildFamilySimulationAdminPanelEmbed(message.author)],
+      components: buildFamilySimulationAdminPanelComponents(message.author.id)
     });
     return;
   }
@@ -1599,7 +2113,7 @@ async function runFamily({ message, args }: PrefixContext) {
   }
 
   await message.reply({
-    embeds: [usageEmbed("family <marry|divorce|partner|date|familysim|familysimstats|familysimmilestones|familysimladder|familysimpanel|anniversary|anniversaryclaim|familyevent|profile|siblings|siblingadd|siblingremove|coupleleaderboard|leaderboard|bondstatus|familyquests|familyachievements|familyachieveclaim>", "Unknown Family Subcommand")]
+    embeds: [usageEmbed("family <marry|divorce|partner|date|familysim|familysimstats|familysimmilestones|familysimladder|familysimduel|familysimduelhistory|familysimseason|familysimseasonclaim|familysimseasonstart|familysimseasonend|familysimladderreset|familysimladderrecompute|familysimaudit|familysimpenaltyclear|familysimadminpanel|familysimpanel|anniversary|anniversaryclaim|familyevent|profile|siblings|siblingadd|siblingremove|coupleleaderboard|leaderboard|bondstatus|familyquests|familyachievements|familyachieveclaim>", "Unknown Family Subcommand")]
   });
 }
 
@@ -1918,6 +2432,64 @@ export async function handlePrefixCommand(message: Message) {
       case "poke":
         await runPoke(ctx);
         return;
+      case "hug":
+        await runActionGif(ctx.message, {
+          gifType: "hug",
+          text: (a, b) => `${a} hugs ${b} ~~ awiee!`,
+          partnerBondAction: "hug"
+        });
+        return;
+      case "pat":
+        await runActionGif(ctx.message, {
+          gifType: "pat",
+          text: (a, b) => `${a} pats ${b} ~~ awiee!`,
+          partnerBondAction: "pat"
+        });
+        return;
+      case "kiss":
+        await runActionGif(ctx.message, {
+          gifType: "kiss",
+          text: (a, b) => `${a} kisses ${b} ~ cute`,
+          partnerBondAction: "kiss"
+        });
+        return;
+      case "cuddle":
+        await runActionGif(ctx.message, {
+          gifType: "cuddle",
+          text: (a, b) => `${a} cuddles ${b} ~ kyaaa!`,
+          partnerBondAction: "cuddle"
+        });
+        return;
+      case "slap":
+        await runActionGif(ctx.message, {
+          gifType: "slap",
+          text: (a, b) => `${a} slaps ${b} ~ baakaah`
+        });
+        return;
+      case "highfive":
+        await runActionGif(ctx.message, {
+          gifType: "highfive",
+          text: (a, b) => `${a} high fives ${b} ~ yoshh!`
+        });
+        return;
+      case "bonk":
+        await runActionGif(ctx.message, {
+          gifType: "bonk",
+          text: (a, b) => `${a} bonks ${b} ~ >.<`
+        });
+        return;
+      case "tickle":
+        await runActionGif(ctx.message, {
+          gifType: "tickle",
+          text: (a, b) => `${a} tickles ${b} ~_~`
+        });
+        return;
+      case "wink":
+        await runActionGif(ctx.message, {
+          gifType: "wink",
+          text: (a, b) => `${a} winks at ${b} ~ uwu`
+        });
+        return;
       case "owo":
         await runOwo(ctx);
         return;
@@ -1998,6 +2570,39 @@ export async function handlePrefixCommand(message: Message) {
         return;
       case "familysimladder":
         await runFamily(asFamilyCtx(ctx, "familysimladder"));
+        return;
+      case "familysimduel":
+        await runFamily(asFamilyCtx(ctx, "familysimduel"));
+        return;
+      case "familysimduelhistory":
+        await runFamily(asFamilyCtx(ctx, "familysimduelhistory"));
+        return;
+      case "familysimseason":
+        await runFamily(asFamilyCtx(ctx, "familysimseason"));
+        return;
+      case "familysimseasonclaim":
+        await runFamily(asFamilyCtx(ctx, "familysimseasonclaim"));
+        return;
+      case "familysimseasonstart":
+        await runFamily(asFamilyCtx(ctx, "familysimseasonstart"));
+        return;
+      case "familysimseasonend":
+        await runFamily(asFamilyCtx(ctx, "familysimseasonend"));
+        return;
+      case "familysimladderreset":
+        await runFamily(asFamilyCtx(ctx, "familysimladderreset"));
+        return;
+      case "familysimladderrecompute":
+        await runFamily(asFamilyCtx(ctx, "familysimladderrecompute"));
+        return;
+      case "familysimaudit":
+        await runFamily(asFamilyCtx(ctx, "familysimaudit"));
+        return;
+      case "familysimadminpanel":
+        await runFamily(asFamilyCtx(ctx, "familysimadminpanel"));
+        return;
+      case "familysimpenaltyclear":
+        await runFamily(asFamilyCtx(ctx, "familysimpenaltyclear"));
         return;
       case "familysimpanel":
         await runFamily(asFamilyCtx(ctx, "familysimpanel"));

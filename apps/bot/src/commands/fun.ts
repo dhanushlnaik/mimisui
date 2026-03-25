@@ -10,6 +10,8 @@ import {
   shipResult,
   textToOwo
 } from "../lib/fun-utils.js";
+import { awardPartnerActionBond } from "../lib/family.js";
+import { callWeebyGif } from "../lib/weeby.js";
 import type { SlashCommand } from "../types/command.js";
 
 const melon = 0xf88379;
@@ -162,9 +164,133 @@ const pokeCommand: SlashCommand = {
     .addUserOption((o) => o.setName("user").setDescription("User to poke").setRequired(true)),
   async execute(interaction) {
     const user = interaction.options.getUser("user", true);
-    await interaction.reply(`${user}, ${interaction.user.displayName} poked you!!!!`);
+    let gifUrl: string | null = null;
+    try {
+      gifUrl = await callWeebyGif("poke");
+    } catch {
+      gifUrl = null;
+    }
+    await interaction.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0xf72585)
+          .setDescription(`${interaction.user} pokes ${user} ~ OwO`)
+          .setImage(gifUrl)
+          .setFooter({ text: "Team Tatsui ❤️" })
+      ]
+    });
   }
 };
+
+function createActionGifCommand(config: {
+  name: string;
+  description: string;
+  gifType: string;
+  template: (author: string, target: string) => string;
+  partnerBondAction?: "hug" | "pat" | "kiss" | "cuddle";
+}): SlashCommand {
+  return {
+    data: new SlashCommandBuilder()
+      .setName(config.name)
+      .setDescription(config.description)
+      .addUserOption((o) => o.setName("user").setDescription("Target user")),
+    async execute(interaction) {
+      const user = interaction.options.getUser("user") ?? interaction.user;
+      let gifUrl: string | null = null;
+      try {
+        gifUrl = await callWeebyGif(config.gifType);
+      } catch {
+        gifUrl = null;
+      }
+      let partnerBonusLine: string | null = null;
+      if (config.partnerBondAction) {
+        const bonus = await awardPartnerActionBond({
+          userId: interaction.user.id,
+          targetUserId: user.id,
+          guildId: interaction.guildId,
+          action: config.partnerBondAction
+        });
+        if (bonus?.applied) {
+          partnerBonusLine = `💞 Partner Bonus: +${bonus.rewards.bondXp} bond XP • +${bonus.rewards.bondScore} UwU`;
+        }
+      }
+      await interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0xf72585)
+            .setDescription(
+              [config.template(`${interaction.user}`, `${user}`), partnerBonusLine]
+                .filter(Boolean)
+                .join("\n")
+            )
+            .setImage(gifUrl)
+            .setFooter({ text: "Team Tatsui ❤️" })
+        ]
+      });
+    }
+  };
+}
+
+const actionGifCommands: SlashCommand[] = [
+  createActionGifCommand({
+    name: "hug",
+    description: "Hug a user",
+    gifType: "hug",
+    template: (a, b) => `${a} hugs ${b} ~~ awiee!`,
+    partnerBondAction: "hug"
+  }),
+  createActionGifCommand({
+    name: "pat",
+    description: "Pat a user",
+    gifType: "pat",
+    template: (a, b) => `${a} pats ${b} ~~ awiee!`,
+    partnerBondAction: "pat"
+  }),
+  createActionGifCommand({
+    name: "kiss",
+    description: "Kiss a user",
+    gifType: "kiss",
+    template: (a, b) => `${a} kisses ${b} ~ cute`,
+    partnerBondAction: "kiss"
+  }),
+  createActionGifCommand({
+    name: "cuddle",
+    description: "Cuddle a user",
+    gifType: "cuddle",
+    template: (a, b) => `${a} cuddles ${b} ~ kyaaa!`,
+    partnerBondAction: "cuddle"
+  }),
+  createActionGifCommand({
+    name: "slap",
+    description: "Slap a user",
+    gifType: "slap",
+    template: (a, b) => `${a} slaps ${b} ~ baakaah`
+  }),
+  createActionGifCommand({
+    name: "highfive",
+    description: "Give a high-five",
+    gifType: "highfive",
+    template: (a, b) => `${a} high fives ${b} ~ yoshh!`
+  }),
+  createActionGifCommand({
+    name: "bonk",
+    description: "Bonk a user",
+    gifType: "bonk",
+    template: (a, b) => `${a} bonks ${b} ~ >.<`
+  }),
+  createActionGifCommand({
+    name: "tickle",
+    description: "Tickle a user",
+    gifType: "tickle",
+    template: (a, b) => `${a} tickles ${b} ~_~`
+  }),
+  createActionGifCommand({
+    name: "wink",
+    description: "Wink at a user",
+    gifType: "wink",
+    template: (a, b) => `${a} winks at ${b} ~ uwu`
+  })
+];
 
 const owoCommand: SlashCommand = {
   data: new SlashCommandBuilder()
@@ -263,5 +389,6 @@ export const funCommands: SlashCommand[] = [
   createTodCommand("wyr", "WYR"),
   createTodCommand("nhie", "NHIE"),
   urbanCommand,
-  rpsCommand
+  rpsCommand,
+  ...actionGifCommands
 ];
