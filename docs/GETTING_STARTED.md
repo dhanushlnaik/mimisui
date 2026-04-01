@@ -58,6 +58,16 @@ pnpm --filter @cocosui/web build
 pnpm --filter @cocosui/bot register
 ```
 
+Registration modes:
+
+```bash
+# guild (fast updates)
+pnpm --filter @cocosui/bot run register:guild
+
+# global (all servers, slower propagation)
+pnpm --filter @cocosui/bot run register:global
+```
+
 ## 6) Start services
 
 ```bash

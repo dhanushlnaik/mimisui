@@ -3,6 +3,7 @@ import { afkCommand } from "./afk.js";
 import { avatarSplitCommand } from "./avsplit.js";
 import { avatarCommand } from "./avatar.js";
 import { bannerCommand } from "./banner.js";
+import { botStatsCommand } from "./botstats.js";
 import { configCommand } from "./config.js";
 import { dailyCommand } from "./daily.js";
 import { demotivationalCommand } from "./demotivational.js";
@@ -24,6 +25,7 @@ import { prefixCommand } from "./prefix.js";
 import { profileCommand } from "./profile.js";
 import { quoteImageCommand } from "./quote.js";
 import { questsCommand } from "./quests.js";
+import { reloadCommandsCommand } from "./reloadcommands.js";
 import {
   relationshipBuyCommand,
   relationshipInventoryCommand,
@@ -47,6 +49,8 @@ import { usersCommand } from "./users.js";
 
 export const commands: AppCommand[] = [
   pingCommand,
+  botStatsCommand,
+  reloadCommandsCommand,
   helpCommand,
   ...familyCommands,
   afkCommand,

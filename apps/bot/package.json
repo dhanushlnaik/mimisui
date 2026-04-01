@@ -8,6 +8,8 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "register": "tsx src/register-commands.ts",
+    "register:guild": "tsx src/register-commands.ts --guild",
+    "register:global": "tsx src/register-commands.ts --global",
     "check": "tsc --noEmit"
   },
   "dependencies": {

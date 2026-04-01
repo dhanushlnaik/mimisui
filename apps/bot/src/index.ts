@@ -15,6 +15,7 @@ import { handleHelpButton, handleHelpSelect } from "./lib/help-view.js";
 import { logger } from "./lib/logger.js";
 import { getPerfSummary, runWithPerfContext } from "./lib/perf-context.js";
 import { grantCommandProgress } from "./lib/progression.js";
+import { getRuntimeMetricsSnapshot, markUnknownInteraction, recordCommandMetric } from "./lib/runtime-metrics.js";
 import { getAvatarUrl } from "./lib/user-avatar.js";
 import { callWeebyCustom, weebyAttachment } from "./lib/weeby.js";
 
@@ -51,6 +52,7 @@ async function safeInteractionResponse(
     }
   } catch (error) {
     if (isUnknownInteractionError(error)) {
+      markUnknownInteraction();
       logger.warn("Skipped stale interaction response (10062).");
       return;
     }
@@ -60,6 +62,12 @@ async function safeInteractionResponse(
 
 client.once("clientReady", () => {
   logger.info(`Bot online as ${client.user?.tag ?? "unknown"}`);
+  setInterval(() => {
+    const stats = getRuntimeMetricsSnapshot();
+    logger.info(
+      `Runtime metrics: uptime=${stats.uptimeSec}s samples=${stats.recentCount} p50=${stats.p50}ms p95=${stats.p95}ms avg=${stats.avg}ms failures=${stats.commandFailures} unknown10062=${stats.unknownInteractionCount}`
+    );
+  }, 300_000).unref?.();
 });
 
 client.on("warn", (msg) => logger.warn(msg));
@@ -166,76 +174,96 @@ client.on("interactionCreate", async (interaction) => {
   try {
     if (interaction.isChatInputCommand()) {
       await runWithPerfContext(interactionKey, async () => {
-      const execStart = performance.now();
-      if (command.type && command.type !== interaction.commandType) {
-        await safeInteractionResponse(interaction, "reply", {
-          content: "Wrong command type.",
-          flags: MessageFlags.Ephemeral
-        });
-        return;
-      }
-      await command.execute(interaction);
-      const execMs = Math.round(performance.now() - execStart);
-      if (execMs >= 1500) {
-        logger.warn(
-          `Slow command execute: /${interaction.commandName} ${execMs}ms (guild=${interaction.guildId ?? "dm"} user=${interaction.user.id})`
-        );
-      } else {
-        logger.info(
-          `Command execute: /${interaction.commandName} ${execMs}ms (guild=${interaction.guildId ?? "dm"} user=${interaction.user.id})`
-        );
-      }
-      const progStart = performance.now();
-      await applyInteractionProgress(interaction, interaction.commandName);
-      const progMs = Math.round(performance.now() - progStart);
-      const totalMs = Math.round(performance.now() - execStart);
-      const perf = getPerfSummary();
-      logger.info(
-        `Command done: /${interaction.commandName} total=${totalMs}ms execute=${execMs}ms progression=${progMs}ms` +
-          (perf
-            ? ` dbMs=${perf.dbTotalMs} dbOps=${perf.dbOps}` +
-              (perf.topDb.length > 0 ? ` topDb=[${perf.topDb.join(", ")}]` : "")
-            : "")
-      );
-      return;
+        const execStart = performance.now();
+        let success = false;
+        try {
+          if (command.type && command.type !== interaction.commandType) {
+            await safeInteractionResponse(interaction, "reply", {
+              content: "Wrong command type.",
+              flags: MessageFlags.Ephemeral
+            });
+            return;
+          }
+          await command.execute(interaction);
+          const execMs = Math.round(performance.now() - execStart);
+          if (execMs >= 1500) {
+            logger.warn(
+              `Slow command execute: /${interaction.commandName} ${execMs}ms (guild=${interaction.guildId ?? "dm"} user=${interaction.user.id})`
+            );
+          } else {
+            logger.info(
+              `Command execute: /${interaction.commandName} ${execMs}ms (guild=${interaction.guildId ?? "dm"} user=${interaction.user.id})`
+            );
+          }
+          const progStart = performance.now();
+          await applyInteractionProgress(interaction, interaction.commandName);
+          const progMs = Math.round(performance.now() - progStart);
+          const totalMs = Math.round(performance.now() - execStart);
+          const perf = getPerfSummary();
+          logger.info(
+            `Command done: /${interaction.commandName} total=${totalMs}ms execute=${execMs}ms progression=${progMs}ms` +
+              (perf
+                ? ` dbMs=${perf.dbTotalMs} dbOps=${perf.dbOps}` +
+                  (perf.topDb.length > 0 ? ` topDb=[${perf.topDb.join(", ")}]` : "")
+                : "")
+          );
+          success = true;
+          return;
+        } finally {
+          recordCommandMetric({
+            command: `/${interaction.commandName}`,
+            durationMs: performance.now() - execStart,
+            success
+          });
+        }
       });
       return;
     }
 
     if (interaction.isMessageContextMenuCommand()) {
       await runWithPerfContext(interactionKey, async () => {
-      const execStart = performance.now();
-      if (command.type !== interaction.commandType) {
-        await safeInteractionResponse(interaction, "reply", {
-          content: "Wrong command type.",
-          flags: MessageFlags.Ephemeral
-        });
-        return;
-      }
-      await command.execute(interaction);
-      const execMs = Math.round(performance.now() - execStart);
-      if (execMs >= 1500) {
-        logger.warn(
-          `Slow command execute: ${interaction.commandName} ${execMs}ms (guild=${interaction.guildId ?? "dm"} user=${interaction.user.id})`
-        );
-      } else {
-        logger.info(
-          `Command execute: ${interaction.commandName} ${execMs}ms (guild=${interaction.guildId ?? "dm"} user=${interaction.user.id})`
-        );
-      }
-      const progStart = performance.now();
-      await applyInteractionProgress(interaction, interaction.commandName);
-      const progMs = Math.round(performance.now() - progStart);
-      const totalMs = Math.round(performance.now() - execStart);
-      const perf = getPerfSummary();
-      logger.info(
-        `Command done: ${interaction.commandName} total=${totalMs}ms execute=${execMs}ms progression=${progMs}ms` +
-          (perf
-            ? ` dbMs=${perf.dbTotalMs} dbOps=${perf.dbOps}` +
-              (perf.topDb.length > 0 ? ` topDb=[${perf.topDb.join(", ")}]` : "")
-            : "")
-      );
-      return;
+        const execStart = performance.now();
+        let success = false;
+        try {
+          if (command.type !== interaction.commandType) {
+            await safeInteractionResponse(interaction, "reply", {
+              content: "Wrong command type.",
+              flags: MessageFlags.Ephemeral
+            });
+            return;
+          }
+          await command.execute(interaction);
+          const execMs = Math.round(performance.now() - execStart);
+          if (execMs >= 1500) {
+            logger.warn(
+              `Slow command execute: ${interaction.commandName} ${execMs}ms (guild=${interaction.guildId ?? "dm"} user=${interaction.user.id})`
+            );
+          } else {
+            logger.info(
+              `Command execute: ${interaction.commandName} ${execMs}ms (guild=${interaction.guildId ?? "dm"} user=${interaction.user.id})`
+            );
+          }
+          const progStart = performance.now();
+          await applyInteractionProgress(interaction, interaction.commandName);
+          const progMs = Math.round(performance.now() - progStart);
+          const totalMs = Math.round(performance.now() - execStart);
+          const perf = getPerfSummary();
+          logger.info(
+            `Command done: ${interaction.commandName} total=${totalMs}ms execute=${execMs}ms progression=${progMs}ms` +
+              (perf
+                ? ` dbMs=${perf.dbTotalMs} dbOps=${perf.dbOps}` +
+                  (perf.topDb.length > 0 ? ` topDb=[${perf.topDb.join(", ")}]` : "")
+                : "")
+          );
+          success = true;
+          return;
+        } finally {
+          recordCommandMetric({
+            command: interaction.commandName,
+            durationMs: performance.now() - execStart,
+            success
+          });
+        }
       });
       return;
     }

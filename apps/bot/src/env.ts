@@ -39,7 +39,8 @@ export const env = createEnv({
     DISCORD_TOKEN: z.string().min(1),
     DATABASE_URL: z.string().url(),
     CLIENT_ID: z.string().min(1),
-    GUILD_ID: z.string().min(1),
+    GUILD_ID: z.string().min(1).optional(),
+    BOT_OWNER_ID: z.string().min(1).optional(),
     WEEBY_API_TOKEN: z.string().min(1).optional()
   },
   runtimeEnv,

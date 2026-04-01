@@ -18,6 +18,8 @@ export type CommandDoc = {
 
 export const commandCatalog: CommandDoc[] = [
   { name: "ping", description: "Check bot latency", category: "utility", slash: "/ping", prefix: "ping", aliases: ["p", "status"] },
+  { name: "botstats", description: "Runtime metrics snapshot for admins", category: "utility", slash: "/botstats", prefix: "-", aliases: ["metrics", "health"] },
+  { name: "reloadcommands", description: "Re-register slash commands (guild/global)", category: "configuration", slash: "/reloadcommands <scope> [guild_id]", prefix: "-", aliases: ["reload"] },
   { name: "avatar", description: "Show single avatar or shared avatars", category: "utility", slash: "/avatar [user] [user2]", prefix: "avatar [@user1] [@user2]", aliases: ["av", "pfp"] },
   { name: "serverav", description: "Show server-specific avatar", category: "utility", slash: "/serverav [user]", prefix: "serverav [@user]", aliases: ["sav"] },
   { name: "banner", description: "Show user banner", category: "utility", slash: "/banner [user]", prefix: "banner [@user]", aliases: ["bnr"] },
