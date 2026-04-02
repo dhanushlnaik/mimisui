@@ -25,6 +25,7 @@ import { prefixCommand } from "./prefix.js";
 import { profileCommand } from "./profile.js";
 import { quoteImageCommand } from "./quote.js";
 import { questsCommand } from "./quests.js";
+import { randomResponseCommand } from "./random-response.js";
 import { reloadCommandsCommand } from "./reloadcommands.js";
 import {
   relationshipBuyCommand,
@@ -80,6 +81,7 @@ export const commands: AppCommand[] = [
   tweetCommand,
   spotifyNowPlayingCommand,
   quoteImageCommand,
+  randomResponseCommand,
   ejectCommand,
   friendshipCommand,
   friendshipAliasCommand,

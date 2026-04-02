@@ -111,6 +111,25 @@ export async function callWeebyGif(type: string, noanime?: boolean): Promise<str
   return data.url;
 }
 
+export async function callWeebyJson(
+  type: string,
+  number?: number
+): Promise<Record<string, unknown> | string | number | boolean> {
+  const token = requireWeebyToken();
+  const url = new URL(`/json/${type}`, WEEBY_API_BASE);
+  url.searchParams.set("token", token);
+  if (typeof number === "number" && Number.isFinite(number)) {
+    url.searchParams.set("number", String(Math.max(0, Math.floor(number))));
+  }
+
+  const response = await fetch(url.toString());
+  if (!response.ok) {
+    throw new Error(`Weeby json failed (${response.status}) for ${type}.`);
+  }
+
+  return (await response.json()) as Record<string, unknown> | string | number | boolean;
+}
+
 export function weebyAttachment(
   generator: string,
   result: GeneratorResult,

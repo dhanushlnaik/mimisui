@@ -100,6 +100,7 @@ export const commandCatalog: CommandDoc[] = [
   { name: "nhie", description: "Never Have I Ever question", category: "fun", slash: "/nhie", prefix: "nhie", aliases: ["neverhaveiever"] },
   { name: "urban", description: "Urban dictionary lookup", category: "fun", slash: "/urban <term>", prefix: "urban <term>", aliases: ["urbandict", "dict", "df"] },
   { name: "rps", description: "Rock Paper Scissors", category: "fun", slash: "/rps <choice>", prefix: "rps <choice>" },
+  { name: "randomresponse", description: "Random JSON responses with next/refresh buttons", category: "fun", slash: "/randomresponse <type> [number] [quote_card]", prefix: "-" , aliases: ["rr", "randomjson"] },
   { name: "triggered", description: "Generate triggered GIF from avatar", category: "image", slash: "/triggered [user] [tint]", prefix: "triggered [@user]", aliases: ["trig"] },
   { name: "thisisspotify", description: "Generate This Is Spotify style image", category: "image", slash: "/thisisspotify [text] [color] [user]", prefix: "thisisspotify [@user] [text] [| hex]", aliases: ["tis", "spotifythis"] },
   { name: "tweet", description: "Generate fake tweet image (supports message link/reply)", category: "image", slash: "/tweet [text] [message_link] [username] [user]", prefix: "tweet (reply to a message) or tweet [@user] [text]", aliases: ["tw"] },

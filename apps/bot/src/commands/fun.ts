@@ -187,6 +187,7 @@ function createActionGifCommand(config: {
   description: string;
   gifType: string;
   template: (author: string, target: string) => string;
+  tone?: "romantic" | "positive" | "negative" | "neutral";
   partnerBondAction?: "hug" | "pat" | "kiss" | "cuddle";
 }): SlashCommand {
   return {
@@ -214,12 +215,30 @@ function createActionGifCommand(config: {
           partnerBonusLine = `💞 Partner Bonus: +${bonus.rewards.bondXp} bond XP • +${bonus.rewards.bondScore} UwU`;
         }
       }
+      const isSelfTarget = user.id === interaction.user.id;
+      const tone = config.tone ?? "neutral";
+      const toneLine =
+        tone === "romantic"
+          ? "💘 Romantic vibes unlocked."
+          : tone === "positive"
+            ? "✨ Wholesome vibes only."
+            : tone === "negative"
+              ? "⚠️ Chaos intensity increased."
+              : "🎬 Anime moment triggered.";
+      const selfLine =
+        tone === "negative" && isSelfTarget
+          ? "You hit yourself with your own chaos."
+          : tone === "romantic" && isSelfTarget
+            ? "Self-love arc activated."
+            : isSelfTarget
+              ? "Solo move, but still stylish."
+              : null;
       await interaction.reply({
         embeds: [
           new EmbedBuilder()
             .setColor(0xf72585)
             .setDescription(
-              [config.template(`${interaction.user}`, `${user}`), partnerBonusLine]
+              [config.template(`${interaction.user}`, `${user}`), toneLine, selfLine, partnerBonusLine]
                 .filter(Boolean)
                 .join("\n")
             )
@@ -233,16 +252,137 @@ function createActionGifCommand(config: {
 
 const actionGifCommands: SlashCommand[] = [
   createActionGifCommand({
+    name: "angry",
+    description: "Get angry at a user",
+    gifType: "angry",
+    tone: "negative",
+    template: (a, b) => `${a} is angry at ${b}!`
+  }),
+  createActionGifCommand({
+    name: "baka",
+    description: "Call a user baka",
+    gifType: "baka",
+    tone: "negative",
+    template: (a, b) => `${a} calls ${b} baka!`
+  }),
+  createActionGifCommand({
+    name: "bath",
+    description: "Bath anime reaction",
+    gifType: "bath",
+    tone: "neutral",
+    template: (a, b) => `${a} splashes bath vibes at ${b}.`
+  }),
+  createActionGifCommand({
+    name: "blow",
+    description: "Blow at a user",
+    gifType: "blow",
+    tone: "neutral",
+    template: (a, b) => `${a} blows at ${b} ~ whoosh!`
+  }),
+  createActionGifCommand({
+    name: "blowkiss",
+    description: "Blow a kiss",
+    gifType: "blowkiss",
+    tone: "romantic",
+    template: (a, b) => `${a} blows a kiss to ${b} 💋`
+  }),
+  createActionGifCommand({
+    name: "boom",
+    description: "Boom reaction",
+    gifType: "boom",
+    tone: "negative",
+    template: (a, b) => `${a} causes a boom near ${b}!`
+  }),
+  createActionGifCommand({
+    name: "beg",
+    description: "Beg dramatically",
+    gifType: "beg",
+    tone: "neutral",
+    template: (a, b) => `${a} begs ${b} dramatically.`
+  }),
+  createActionGifCommand({
+    name: "beer",
+    description: "Share a beer vibe",
+    gifType: "beer",
+    tone: "positive",
+    template: (a, b) => `${a} offers a beer to ${b}.`
+  }),
+  createActionGifCommand({
+    name: "bite",
+    description: "Bite a user",
+    gifType: "bite",
+    tone: "negative",
+    template: (a, b) => `${a} bites ${b} ~ nom.`
+  }),
+  createActionGifCommand({
+    name: "blush",
+    description: "Blush at a user",
+    gifType: "blush",
+    tone: "romantic",
+    template: (a, b) => `${a} blushes at ${b} ~ >.<`
+  }),
+  createActionGifCommand({
     name: "hug",
     description: "Hug a user",
     gifType: "hug",
+    tone: "positive",
     template: (a, b) => `${a} hugs ${b} ~~ awiee!`,
     partnerBondAction: "hug"
+  }),
+  createActionGifCommand({
+    name: "cheer",
+    description: "Cheer for a user",
+    gifType: "cheer",
+    tone: "positive",
+    template: (a, b) => `${a} cheers for ${b}!`
+  }),
+  createActionGifCommand({
+    name: "chase",
+    description: "Chase a user",
+    gifType: "chase",
+    tone: "neutral",
+    template: (a, b) => `${a} chases ${b} at full speed!`
+  }),
+  createActionGifCommand({
+    name: "clap",
+    description: "Clap for a user",
+    gifType: "clap",
+    tone: "positive",
+    template: (a, b) => `${a} claps for ${b}.`
+  }),
+  createActionGifCommand({
+    name: "coffee",
+    description: "Coffee vibes",
+    gifType: "coffee",
+    tone: "positive",
+    template: (a, b) => `${a} shares coffee vibes with ${b}.`
+  }),
+  createActionGifCommand({
+    name: "cookie",
+    description: "Give a cookie",
+    gifType: "cookie",
+    tone: "positive",
+    template: (a, b) => `${a} gives ${b} a cookie.`
+  }),
+  createActionGifCommand({
+    name: "cringe",
+    description: "Cringe reaction",
+    gifType: "cringe",
+    tone: "negative",
+    template: (a, b) => `${a} cringes at ${b}.`
+  }),
+  createActionGifCommand({
+    name: "cry",
+    description: "Cry reaction",
+    gifType: "cry",
+    tone: "neutral",
+    template: (a, b) => `${a} cries in front of ${b}.`
   }),
   createActionGifCommand({
     name: "pat",
     description: "Pat a user",
     gifType: "pat",
+    tone: "positive",
     template: (a, b) => `${a} pats ${b} ~~ awiee!`,
     partnerBondAction: "pat"
   }),
@@ -250,6 +390,7 @@ const actionGifCommands: SlashCommand[] = [
     name: "kiss",
     description: "Kiss a user",
     gifType: "kiss",
+    tone: "romantic",
     template: (a, b) => `${a} kisses ${b} ~ cute`,
     partnerBondAction: "kiss"
   }),
@@ -257,37 +398,302 @@ const actionGifCommands: SlashCommand[] = [
     name: "cuddle",
     description: "Cuddle a user",
     gifType: "cuddle",
+    tone: "romantic",
     template: (a, b) => `${a} cuddles ${b} ~ kyaaa!`,
     partnerBondAction: "cuddle"
+  }),
+  createActionGifCommand({
+    name: "cute",
+    description: "Cute reaction",
+    gifType: "cute",
+    tone: "positive",
+    template: (a, b) => `${a} acts cute around ${b}.`
+  }),
+  createActionGifCommand({
+    name: "dab",
+    description: "Dab on a user",
+    gifType: "dab",
+    tone: "neutral",
+    template: (a, b) => `${a} dabs on ${b}.`
+  }),
+  createActionGifCommand({
+    name: "dance",
+    description: "Dance with vibes",
+    gifType: "dance",
+    tone: "positive",
+    template: (a, b) => `${a} dances with ${b}!`
+  }),
+  createActionGifCommand({
+    name: "facepalm",
+    description: "Facepalm at a user",
+    gifType: "facepalm",
+    tone: "negative",
+    template: (a, b) => `${a} facepalms at ${b}.`
+  }),
+  createActionGifCommand({
+    name: "feed",
+    description: "Feed a user",
+    gifType: "feed",
+    tone: "positive",
+    template: (a, b) => `${a} feeds ${b} ~ uwu`
+  }),
+  createActionGifCommand({
+    name: "flower",
+    description: "Give a flower",
+    gifType: "flower",
+    tone: "romantic",
+    template: (a, b) => `${a} gives ${b} a flower 🌸`
+  }),
+  createActionGifCommand({
+    name: "fly",
+    description: "Fly reaction",
+    gifType: "fly",
+    tone: "neutral",
+    template: (a, b) => `${a} flies around ${b}.`
+  }),
+  createActionGifCommand({
+    name: "grumpy",
+    description: "Grumpy reaction",
+    gifType: "grumpy",
+    tone: "negative",
+    template: (a, b) => `${a} gets grumpy at ${b}.`
+  }),
+  createActionGifCommand({
+    name: "happy",
+    description: "Happy reaction",
+    gifType: "happy",
+    tone: "positive",
+    template: (a, b) => `${a} is happy with ${b}!`
+  }),
+  createActionGifCommand({
+    name: "hate",
+    description: "Hate reaction",
+    gifType: "hate",
+    tone: "negative",
+    template: (a, b) => `${a} hates this moment with ${b}.`
+  }),
+  createActionGifCommand({
+    name: "icecream",
+    description: "Share ice cream vibes",
+    gifType: "icecream",
+    tone: "positive",
+    template: (a, b) => `${a} shares ice cream with ${b}.`
+  }),
+  createActionGifCommand({
+    name: "kick",
+    description: "Kick a user",
+    gifType: "kick",
+    tone: "negative",
+    template: (a, b) => `${a} kicks ${b}!`
+  }),
+  createActionGifCommand({
+    name: "lick",
+    description: "Lick a user",
+    gifType: "lick",
+    tone: "romantic",
+    template: (a, b) => `${a} licks ${b} ~ sus!`
+  }),
+  createActionGifCommand({
+    name: "love",
+    description: "Show love",
+    gifType: "love",
+    tone: "romantic",
+    template: (a, b) => `${a} sends love to ${b} ❤️`
+  }),
+  createActionGifCommand({
+    name: "lurk",
+    description: "Lurk around a user",
+    gifType: "lurk",
+    tone: "neutral",
+    template: (a, b) => `${a} lurks around ${b}.`
+  }),
+  createActionGifCommand({
+    name: "nom",
+    description: "Nom a user",
+    gifType: "nom",
+    tone: "neutral",
+    template: (a, b) => `${a} noms ${b} ~ nyaa!`
+  }),
+  createActionGifCommand({
+    name: "nuzzle",
+    description: "Nuzzle a user",
+    gifType: "nuzzle",
+    tone: "romantic",
+    template: (a, b) => `${a} nuzzles ${b}.`
+  }),
+  createActionGifCommand({
+    name: "protect",
+    description: "Protect a user",
+    gifType: "protect",
+    tone: "positive",
+    template: (a, b) => `${a} protects ${b}.`
   }),
   createActionGifCommand({
     name: "slap",
     description: "Slap a user",
     gifType: "slap",
+    tone: "negative",
     template: (a, b) => `${a} slaps ${b} ~ baakaah`
+  }),
+  createActionGifCommand({
+    name: "punch",
+    description: "Punch a user",
+    gifType: "punch",
+    tone: "negative",
+    template: (a, b) => `${a} punches ${b} ~ OwO`
+  }),
+  createActionGifCommand({
+    name: "pout",
+    description: "Pout at a user",
+    gifType: "pout",
+    tone: "negative",
+    template: (a, b) => `${a} pouts at ${b} ~ hmph`
   }),
   createActionGifCommand({
     name: "highfive",
     description: "Give a high-five",
     gifType: "highfive",
+    tone: "positive",
     template: (a, b) => `${a} high fives ${b} ~ yoshh!`
   }),
   createActionGifCommand({
     name: "bonk",
     description: "Bonk a user",
     gifType: "bonk",
+    tone: "negative",
     template: (a, b) => `${a} bonks ${b} ~ >.<`
   }),
   createActionGifCommand({
     name: "tickle",
     description: "Tickle a user",
     gifType: "tickle",
+    tone: "positive",
     template: (a, b) => `${a} tickles ${b} ~_~`
+  }),
+  createActionGifCommand({
+    name: "rawr",
+    description: "Rawr at a user",
+    gifType: "rawr",
+    tone: "neutral",
+    template: (a, b) => `${a} goes rawr at ${b}!`
+  }),
+  createActionGifCommand({
+    name: "run",
+    description: "Run reaction",
+    gifType: "run",
+    tone: "neutral",
+    template: (a, b) => `${a} runs around ${b}.`
+  }),
+  createActionGifCommand({
+    name: "shh",
+    description: "Tell a user to shh",
+    gifType: "shh",
+    tone: "neutral",
+    template: (a, b) => `${a} tells ${b} to shh.`
+  }),
+  createActionGifCommand({
+    name: "shrug",
+    description: "Shrug reaction",
+    gifType: "shrug",
+    tone: "neutral",
+    template: (a, b) => `${a} shrugs at ${b}.`
+  }),
+  createActionGifCommand({
+    name: "sip",
+    description: "Sip tea reaction",
+    gifType: "sip",
+    tone: "neutral",
+    template: (a, b) => `${a} sips tea while looking at ${b}.`
+  }),
+  createActionGifCommand({
+    name: "stare",
+    description: "Stare at a user",
+    gifType: "stare",
+    tone: "neutral",
+    template: (a, b) => `${a} stares at ${b}.`
+  }),
+  createActionGifCommand({
+    name: "sword",
+    description: "Sword action",
+    gifType: "sword",
+    tone: "negative",
+    template: (a, b) => `${a} challenges ${b} with a sword!`
+  }),
+  createActionGifCommand({
+    name: "tease",
+    description: "Tease a user",
+    gifType: "tease",
+    tone: "neutral",
+    template: (a, b) => `${a} teases ${b}.`
+  }),
+  createActionGifCommand({
+    name: "teleport",
+    description: "Teleport reaction",
+    gifType: "teleport",
+    tone: "neutral",
+    template: (a, b) => `${a} teleports near ${b}.`
+  }),
+  createActionGifCommand({
+    name: "think",
+    description: "Thinking reaction",
+    gifType: "think",
+    tone: "neutral",
+    template: (a, b) => `${a} thinks about ${b}.`
+  }),
+  createActionGifCommand({
+    name: "throw",
+    description: "Throw at a user",
+    gifType: "throw",
+    tone: "negative",
+    template: (a, b) => `${a} throws at ${b}!`
+  }),
+  createActionGifCommand({
+    name: "wag",
+    description: "Wag reaction",
+    gifType: "wag",
+    tone: "positive",
+    template: (a, b) => `${a} wags at ${b}.`
+  }),
+  createActionGifCommand({
+    name: "wasted",
+    description: "Wasted reaction",
+    gifType: "wasted",
+    tone: "negative",
+    template: (a, b) => `${a} is wasted around ${b}.`
+  }),
+  createActionGifCommand({
+    name: "wave",
+    description: "Wave at a user",
+    gifType: "wave",
+    tone: "positive",
+    template: (a, b) => `${a} waves at ${b}.`
+  }),
+  createActionGifCommand({
+    name: "wedding",
+    description: "Wedding vibes",
+    gifType: "wedding",
+    tone: "romantic",
+    template: (a, b) => `${a} shares wedding vibes with ${b}.`
+  }),
+  createActionGifCommand({
+    name: "whisper",
+    description: "Whisper to a user",
+    gifType: "whisper",
+    tone: "romantic",
+    template: (a, b) => `${a} whispers to ${b}.`
+  }),
+  createActionGifCommand({
+    name: "wiggle",
+    description: "Wiggle reaction",
+    gifType: "wiggle",
+    tone: "positive",
+    template: (a, b) => `${a} wiggles at ${b}.`
   }),
   createActionGifCommand({
     name: "wink",
     description: "Wink at a user",
     gifType: "wink",
+    tone: "romantic",
     template: (a, b) => `${a} winks at ${b} ~ uwu`
   })
 ];

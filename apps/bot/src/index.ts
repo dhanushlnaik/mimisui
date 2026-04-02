@@ -1,6 +1,7 @@
 import { Client, GatewayIntentBits, MessageFlags, Partials } from "discord.js";
 import { performance } from "node:perf_hooks";
 import { commands, commandMap } from "./commands/index.js";
+import { handleRandomResponseButton } from "./commands/random-response.js";
 import { env } from "./env.js";
 import { registerMessageCreate } from "./events/message-create.js";
 import {
@@ -144,6 +145,8 @@ client.on("interactionCreate", async (interaction) => {
     if (handled) return;
   }
   if (interaction.isButton()) {
+    const handledRandomResponse = await handleRandomResponseButton(interaction);
+    if (handledRandomResponse) return;
     const handledFamily = await handleFamilyProposalButton(interaction);
     if (handledFamily) return;
     const handledFamilyQuest = await handleFamilyQuestButton(interaction);
