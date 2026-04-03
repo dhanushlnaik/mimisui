@@ -1,4 +1,4 @@
-import { SlashCommandBuilder } from "discord.js";
+import { MessageFlags, SlashCommandBuilder } from "discord.js";
 import { buildCommandHelpMessage, buildHelpMessage } from "../lib/help-view.js";
 import type { SlashCommand } from "../types/command.js";
 
@@ -16,14 +16,14 @@ export const helpCommand: SlashCommand = {
     if (command) {
       await interaction.reply({
         embeds: [buildCommandHelpMessage(command)],
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return;
     }
 
     await interaction.reply({
       ...buildHelpMessage("overview", interaction.user.id),
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
   }
 };

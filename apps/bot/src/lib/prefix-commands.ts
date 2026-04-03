@@ -10,11 +10,9 @@ import {
 import {
   commandCatalog,
   findCommandDoc,
-  helpCategoryLabels,
-  prefixAliasMap,
-  type HelpCategory
+  prefixAliasMap
 } from "./command-catalog.js";
-import { buildHelpMessage } from "./help-view.js";
+import { buildHelpMessage, type HelpSection } from "./help-view.js";
 import { getCurrentFamilyEvent } from "./family-events.js";
 import {
   awardPartnerActionBond,
@@ -1151,13 +1149,26 @@ async function runHelp({ message, args }: PrefixContext) {
   }
 
   const normalized = (detail ?? "overview").toLowerCase();
-  const categories = new Set<HelpCategory>(Object.keys(helpCategoryLabels) as HelpCategory[]);
-
-  const category =
-    categories.has(normalized as HelpCategory) && normalized !== "overview"
-      ? (normalized as HelpCategory)
-      : ("overview" as HelpCategory);
-  await message.reply(buildHelpMessage(category, message.author.id, 0));
+  const sections = new Set([
+    "overview",
+    "rankings",
+    "economy",
+    "family",
+    "simulation",
+    "social",
+    "fun",
+    "actions",
+    "images",
+    "utility",
+    "admin",
+    "config",
+    "image",
+    "configuration"
+  ]);
+  const mapped =
+    normalized === "image" ? "images" : normalized === "configuration" ? "config" : normalized;
+  const section: HelpSection = (sections.has(mapped) ? mapped : "overview") as HelpSection;
+  await message.reply(buildHelpMessage(section, message.author.id, 0));
 }
 
 async function runFamily({ message, args }: PrefixContext) {

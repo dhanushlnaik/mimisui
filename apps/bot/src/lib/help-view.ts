@@ -8,253 +8,335 @@ import {
   type ButtonInteraction,
   type StringSelectMenuInteraction
 } from "discord.js";
-import {
-  commandCatalog,
-  findCommandDoc,
-  helpCategoryLabels,
-  type HelpCategory
-} from "./command-catalog.js";
+import { commandCatalog, findCommandDoc, type CommandDoc } from "./command-catalog.js";
+
+export type HelpSection =
+  | "overview"
+  | "rankings"
+  | "economy"
+  | "family"
+  | "simulation"
+  | "social"
+  | "fun"
+  | "actions"
+  | "images"
+  | "utility"
+  | "admin"
+  | "config";
 
 type HelpState = {
-  category: HelpCategory;
+  section: HelpSection;
   page: number;
   ownerId: string;
 };
 
-const HELP_PAGE_SIZE = 6;
+const HELP_PAGE_SIZE = 20;
 const HELP_LINKS = {
   invite: "https://discord.com/oauth2/authorize?client_id=843011966150115368&scope=bot%20applications.commands&permissions=274877975552",
   support: "https://discord.gg/eZFKMmS6vz",
   vote: "https://top.gg/"
 };
 
-const categoryEmoji: Record<HelpCategory, string> = {
-  overview: "🏠",
-  utility: "🧰",
-  fun: "🎉",
-  social: "💞",
-  configuration: "⚙️",
-  image: "🖼️"
+const SECTION_ORDER: HelpSection[] = [
+  "overview",
+  "rankings",
+  "economy",
+  "family",
+  "simulation",
+  "social",
+  "fun",
+  "actions",
+  "images",
+  "utility",
+  "admin",
+  "config"
+];
+
+const sectionMeta: Record<HelpSection, { emoji: string; label: string; subtitle: string }> = {
+  overview: { emoji: "🏠", label: "Command List", subtitle: "Organized command browser" },
+  rankings: { emoji: "🏅", label: "Rankings", subtitle: "Levels, profiles, and leaderboard flow" },
+  economy: { emoji: "💰", label: "Economy", subtitle: "Coins, shop, daily, quests, inventory" },
+  family: { emoji: "💞", label: "Family", subtitle: "Partner, sibling, relationship progression" },
+  simulation: { emoji: "🧪", label: "Simulation", subtitle: "Family sim systems, seasons, duel ladder" },
+  social: { emoji: "🫂", label: "Social", subtitle: "Community and profile interaction commands" },
+  fun: { emoji: "🎲", label: "Fun", subtitle: "Games, trivia, jokes, random responses" },
+  actions: { emoji: "⚔️", label: "Actions", subtitle: "Action GIF and expression commands" },
+  images: { emoji: "🖼️", label: "Image Generation", subtitle: "Meme, card, quote, overlay generators" },
+  utility: { emoji: "🧰", label: "Utility", subtitle: "General utility and information tools" },
+  admin: { emoji: "🛡️", label: "Admin", subtitle: "Owner/admin operations and moderation tools" },
+  config: { emoji: "⚙️", label: "Configuration", subtitle: "Guild settings and command setup" }
 };
 
-function getCategoryCommandCount(category: Exclude<HelpCategory, "overview">) {
-  return commandCatalog.filter((c) => c.category === category).length;
+const sectionColors: Record<HelpSection, number> = {
+  overview: 0x5b8cff,
+  rankings: 0x7c3aed,
+  economy: 0xf59e0b,
+  family: 0xf72585,
+  simulation: 0x10b981,
+  social: 0xec4899,
+  fun: 0x8b5cf6,
+  actions: 0xef4444,
+  images: 0x06b6d4,
+  utility: 0x3b82f6,
+  admin: 0xf97316,
+  config: 0x64748b
+};
+
+function getSectionForCommand(c: CommandDoc): Exclude<HelpSection, "overview"> {
+  const name = c.name.toLowerCase();
+  const isFamilySim = name.startsWith("familysim");
+  const isFamilyCore = [
+    "family",
+    "marry",
+    "divorce",
+    "partner",
+    "date",
+    "anniversary",
+    "anniversaryclaim",
+    "familyevent",
+    "familyprofile",
+    "siblings",
+    "siblingadd",
+    "siblingremove",
+    "coupleleaderboard",
+    "familyleaderboard",
+    "bondstatus",
+    "familyquests",
+    "familyachievements",
+    "familyachieveclaim"
+  ].includes(name);
+  const isEconomy = [
+    "daily",
+    "quests",
+    "shop",
+    "leaderboard",
+    "profile",
+    "relationshipshop",
+    "relationshipinventory",
+    "relationshipbuy",
+    "relationshipuse"
+  ].includes(name);
+  const isAction = [
+    "action",
+    "hug",
+    "pat",
+    "kiss",
+    "cuddle",
+    "slap",
+    "highfive",
+    "bonk",
+    "tickle",
+    "wink",
+    "poke"
+  ].includes(name);
+  const isAdmin = [
+    "botstats",
+    "reloadcommands",
+    "familysimseasonstart",
+    "familysimseasonend",
+    "familysimladderreset",
+    "familysimladderrecompute",
+    "familysimaudit",
+    "familysimpenaltyclear",
+    "familysimadminpanel"
+  ].includes(name);
+  const isConfig = ["prefix", "config"].includes(name);
+  const isRanking = ["profile", "leaderboard"].includes(name);
+
+  if (isAdmin) return "admin";
+  if (isConfig) return "config";
+  if (isFamilySim) return "simulation";
+  if (isFamilyCore) return "family";
+  if (isEconomy) return "economy";
+  if (isAction) return "actions";
+  if (c.category === "image") return "images";
+  if (isRanking) return "rankings";
+  if (c.category === "social") return "social";
+  if (c.category === "fun") return "fun";
+  return "utility";
 }
 
-function getCategoryPages(category: Exclude<HelpCategory, "overview">) {
-  const commands = commandCatalog.filter((c) => c.category === category);
+function getCommandsForSection(section: Exclude<HelpSection, "overview">) {
+  return commandCatalog
+    .filter((c) => getSectionForCommand(c) === section)
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function getSectionCount(section: Exclude<HelpSection, "overview">) {
+  return getCommandsForSection(section).length;
+}
+
+function getSectionPages(section: Exclude<HelpSection, "overview">) {
+  const commands = getCommandsForSection(section);
   const pages: string[] = [];
 
   for (let i = 0; i < commands.length; i += HELP_PAGE_SIZE) {
     const chunk = commands.slice(i, i + HELP_PAGE_SIZE);
-    const text = chunk
-      .map((c) => {
-        const slash = `Slash: \`${c.slash}\``;
-        const prefix = c.prefix ? `\nPrefix: \`${c.prefix}\`` : "";
-        const aliases =
-          c.aliases && c.aliases.length > 0
-            ? `\nAliases: ${c.aliases.map((a) => `\`${a}\``).join(", ")}`
-            : "";
-        return `**${c.name}**\n${c.description}\n${slash}${prefix}${aliases}`;
-      })
-      .join("\n\n");
-    pages.push(text);
+    const chips = chunk.map((c) => `\`${c.name}\``).join(" ");
+    pages.push(chips.length > 0 ? chips : "No commands in this section yet.");
   }
 
-  return pages.length > 0 ? pages : ["No commands available in this category yet."];
+  return pages.length > 0 ? pages : ["No commands in this section yet."];
+}
+
+function chipsForSection(section: Exclude<HelpSection, "overview">, max = 18) {
+  const commands = getCommandsForSection(section);
+  if (commands.length === 0) return "`-`";
+  const head = commands.slice(0, max).map((c) => `\`${c.name}\``);
+  const remaining = commands.length - head.length;
+  if (remaining > 0) {
+    head.push(`\`+${remaining} more\``);
+  }
+  return head.join(" ");
 }
 
 function buildOverviewEmbed() {
-  const utility = getCategoryCommandCount("utility");
-  const fun = getCategoryCommandCount("fun");
-  const social = getCategoryCommandCount("social");
-  const config = getCategoryCommandCount("configuration");
-  const image = getCategoryCommandCount("image");
   const total = commandCatalog.length;
-
-  return new EmbedBuilder()
-    .setColor(0x5b8cff)
-    .setTitle("CoCo-sui Help Center")
+  const embed = new EmbedBuilder()
+    .setColor(sectionColors.overview)
+    .setTitle("Command List")
     .setDescription(
-      "Interactive command browser with categories, aliases, slash usage, and prefix usage."
+      [
+        "Here is the list of commands!",
+        "For more info on a specific command, use `/help command:<name>`",
+        "Need more help? Join our support server.",
+        "",
+        `Total documented commands: **${total}**`
+      ].join("\n")
     )
-    .addFields(
-      {
-        name: "Legend",
-        value: "```txt\n<> = required argument\n[] = optional argument\n```"
-      },
-      {
-        name: "Categories",
-        value:
-          `Utility: **${utility}**\n` +
-          `Fun: **${fun}**\n` +
-          `Social: **${social}**\n` +
-          `Configuration: **${config}**\n` +
-          `Image: **${image}**`
-      },
-      {
-        name: "Quick Start",
-        value:
-          "`/help` interactive panel\n" +
-          "`help <category>` or `help <command>`\n" +
-          `Total commands documented: **${total}**`
-      }
-    )
-    .setFooter({ text: "Use the menu and pager buttons below." });
+    .setFooter({ text: "Use the category menu and pager below." });
+
+  for (const section of SECTION_ORDER) {
+    if (section === "overview") continue;
+    const meta = sectionMeta[section];
+    embed.addFields({
+      name: `${meta.emoji} ${meta.label}`,
+      value: chipsForSection(section as Exclude<HelpSection, "overview">)
+    });
+  }
+
+  return embed;
 }
 
-function buildCategoryEmbed(category: Exclude<HelpCategory, "overview">, page: number) {
-  const pages = getCategoryPages(category);
+function buildSectionEmbed(section: Exclude<HelpSection, "overview">, page: number) {
+  const pages = getSectionPages(section);
   const safePage = Math.max(0, Math.min(page, pages.length - 1));
-
+  const meta = sectionMeta[section];
   return new EmbedBuilder()
-    .setColor(0x5b8cff)
-    .setTitle(`${categoryEmoji[category]} ${helpCategoryLabels[category]} Commands`)
-    .setDescription(pages[safePage] ?? "No commands found.")
-    .setFooter({ text: `Page ${safePage + 1}/${pages.length}` });
+    .setColor(sectionColors[section])
+    .setTitle(`${meta.emoji} ${meta.label}`)
+    .setDescription(
+      [
+        `**${meta.subtitle}**`,
+        "",
+        pages[safePage] ?? "No commands found."
+      ].join("\n")
+    )
+    .setFooter({ text: `Page ${safePage + 1}/${pages.length} • /help command:<name> for detailed usage` });
 }
 
-function buildHelpComponents({ category, page, ownerId }: HelpState) {
+function buildHelpComponents({ section, page, ownerId }: HelpState) {
   const menu = new StringSelectMenuBuilder()
     .setCustomId(`help:select:${ownerId}`)
-    .setPlaceholder("Select any category")
+    .setPlaceholder("Browse command categories")
     .addOptions(
-      { label: `${helpCategoryLabels.overview}`, value: "overview", emoji: categoryEmoji.overview, default: category === "overview" },
-      { label: `${helpCategoryLabels.utility} (${getCategoryCommandCount("utility")})`, value: "utility", emoji: categoryEmoji.utility, default: category === "utility" },
-      { label: `${helpCategoryLabels.fun} (${getCategoryCommandCount("fun")})`, value: "fun", emoji: categoryEmoji.fun, default: category === "fun" },
-      { label: `${helpCategoryLabels.social} (${getCategoryCommandCount("social")})`, value: "social", emoji: categoryEmoji.social, default: category === "social" },
-      { label: `${helpCategoryLabels.configuration} (${getCategoryCommandCount("configuration")})`, value: "configuration", emoji: categoryEmoji.configuration, default: category === "configuration" },
-      { label: `${helpCategoryLabels.image} (${getCategoryCommandCount("image")})`, value: "image", emoji: categoryEmoji.image, default: category === "image" }
+      ...SECTION_ORDER.map((key) => {
+        const meta = sectionMeta[key];
+        const count =
+          key === "overview" ? commandCatalog.length : getSectionCount(key as Exclude<HelpSection, "overview">);
+        return {
+          label: `${meta.label} (${count})`,
+          value: key,
+          emoji: meta.emoji,
+          default: section === key
+        };
+      })
     );
 
   const selectRow = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu);
-
-  const pages =
-    category === "overview"
-      ? 1
-      : getCategoryPages(category as Exclude<HelpCategory, "overview">).length;
-
+  const pages = section === "overview" ? 1 : getSectionPages(section as Exclude<HelpSection, "overview">).length;
   const safePage = Math.max(0, Math.min(page, pages - 1));
-  const isOverview = category === "overview";
+  const isOverview = section === "overview";
 
   const navRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder()
-      .setCustomId(`help:nav:${ownerId}:${category}:${safePage}:first`)
-      .setLabel("⏮")
-      .setStyle(ButtonStyle.Secondary)
-      .setDisabled(isOverview || safePage <= 0),
-    new ButtonBuilder()
-      .setCustomId(`help:nav:${ownerId}:${category}:${safePage}:prev`)
-      .setLabel("◀")
-      .setStyle(ButtonStyle.Secondary)
-      .setDisabled(isOverview || safePage <= 0),
-    new ButtonBuilder()
-      .setCustomId(`help:nav:${ownerId}:${category}:${safePage}:counter`)
-      .setLabel(isOverview ? "1/1" : `${safePage + 1}/${pages}`)
-      .setStyle(ButtonStyle.Secondary)
-      .setDisabled(true),
-    new ButtonBuilder()
-      .setCustomId(`help:nav:${ownerId}:${category}:${safePage}:next`)
-      .setLabel("▶")
-      .setStyle(ButtonStyle.Secondary)
-      .setDisabled(isOverview || safePage >= pages - 1),
-    new ButtonBuilder()
-      .setCustomId(`help:nav:${ownerId}:${category}:${safePage}:last`)
-      .setLabel("⏭")
-      .setStyle(ButtonStyle.Secondary)
-      .setDisabled(isOverview || safePage >= pages - 1)
+    new ButtonBuilder().setCustomId(`help:nav:${ownerId}:${section}:${safePage}:first`).setLabel("⏮").setStyle(ButtonStyle.Secondary).setDisabled(isOverview || safePage <= 0),
+    new ButtonBuilder().setCustomId(`help:nav:${ownerId}:${section}:${safePage}:prev`).setLabel("◀").setStyle(ButtonStyle.Secondary).setDisabled(isOverview || safePage <= 0),
+    new ButtonBuilder().setCustomId(`help:nav:${ownerId}:${section}:${safePage}:counter`).setLabel(isOverview ? "1/1" : `${safePage + 1}/${pages}`).setStyle(ButtonStyle.Secondary).setDisabled(true),
+    new ButtonBuilder().setCustomId(`help:nav:${ownerId}:${section}:${safePage}:next`).setLabel("▶").setStyle(ButtonStyle.Secondary).setDisabled(isOverview || safePage >= pages - 1),
+    new ButtonBuilder().setCustomId(`help:nav:${ownerId}:${section}:${safePage}:last`).setLabel("⏭").setStyle(ButtonStyle.Secondary).setDisabled(isOverview || safePage >= pages - 1)
   );
 
-  const quickLinks = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder()
-      .setLabel("Overview")
-      .setCustomId(`help:nav:${ownerId}:${category}:${safePage}:home`)
-      .setStyle(ButtonStyle.Primary)
-      .setDisabled(category === "overview"),
-    new ButtonBuilder()
-      .setLabel("Invite")
-      .setStyle(ButtonStyle.Link)
-      .setURL(HELP_LINKS.invite),
-    new ButtonBuilder()
-      .setLabel("Support")
-      .setStyle(ButtonStyle.Link)
-      .setURL(HELP_LINKS.support),
-    new ButtonBuilder()
-      .setLabel("Vote")
-      .setStyle(ButtonStyle.Link)
-      .setURL(HELP_LINKS.vote)
+  const linkRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setLabel("Overview").setCustomId(`help:nav:${ownerId}:${section}:${safePage}:home`).setStyle(ButtonStyle.Primary).setDisabled(section === "overview"),
+    new ButtonBuilder().setLabel("Invite").setStyle(ButtonStyle.Link).setURL(HELP_LINKS.invite),
+    new ButtonBuilder().setLabel("Support").setStyle(ButtonStyle.Link).setURL(HELP_LINKS.support),
+    new ButtonBuilder().setLabel("Vote").setStyle(ButtonStyle.Link).setURL(HELP_LINKS.vote)
   );
 
-  return [selectRow, quickLinks, navRow];
+  return [selectRow, linkRow, navRow];
 }
 
-function normalizeStartCategory(input: HelpCategory) {
-  return input;
+function normalizeSection(input: HelpSection): HelpSection {
+  return SECTION_ORDER.includes(input) ? input : "overview";
 }
 
-function normalizeStartPage(category: HelpCategory, page: number) {
-  if (category === "overview") return 0;
-  const total = getCategoryPages(category as Exclude<HelpCategory, "overview">).length;
+function normalizePage(section: HelpSection, page: number) {
+  if (section === "overview") return 0;
+  const total = getSectionPages(section as Exclude<HelpSection, "overview">).length;
   return Math.max(0, Math.min(page, total - 1));
 }
 
 function renderHelpState(state: HelpState) {
-  const category = normalizeStartCategory(state.category);
-  const page = normalizeStartPage(category, state.page);
-  const { ownerId } = state;
+  const section = normalizeSection(state.section);
+  const page = normalizePage(section, state.page);
 
   const embed =
-    category === "overview"
+    section === "overview"
       ? buildOverviewEmbed()
-      : buildCategoryEmbed(category as Exclude<HelpCategory, "overview">, page);
+      : buildSectionEmbed(section as Exclude<HelpSection, "overview">, page);
 
   return {
     embeds: [embed],
-    components: buildHelpComponents({ category, page, ownerId })
+    components: buildHelpComponents({ section, page, ownerId: state.ownerId })
   };
 }
 
-export function buildHelpMessage(category: HelpCategory, ownerId: string, page = 0) {
-  return renderHelpState({ category, page, ownerId });
+export function buildHelpMessage(section: HelpSection, ownerId: string, page = 0) {
+  return renderHelpState({ section, page, ownerId });
 }
 
 export function buildCommandHelpMessage(input: string) {
   const command = findCommandDoc(input);
   if (!command) {
     return new EmbedBuilder()
-      .setColor(0xffb347)
+      .setColor(sectionColors.overview)
       .setTitle("Command Not Found")
-      .setDescription(`No command found for \`${input}\`. Try \`/help\` or \`help\`.`);
+      .setDescription(`No command found for \`${input}\`. Try \`/help\`.`);
   }
 
+  const section = getSectionForCommand(command);
   return new EmbedBuilder()
-    .setColor(0x5b8cff)
+    .setColor(sectionColors[section])
     .setTitle(`Help: ${command.name}`)
     .setDescription(command.description)
     .addFields(
+      { name: "Category", value: `${sectionMeta[section].emoji} ${sectionMeta[section].label}` },
       { name: "Slash", value: `\`${command.slash}\`` },
       { name: "Prefix", value: command.prefix ? `\`${command.prefix}\`` : "N/A" },
       {
         name: "Aliases",
-        value: command.aliases && command.aliases.length > 0
-          ? command.aliases.map((a) => `\`${a}\``).join(", ")
-          : "None"
+        value: command.aliases && command.aliases.length > 0 ? command.aliases.map((a) => `\`${a}\``).join(", ") : "None"
       },
       {
         name: "Examples",
-        value:
-          command.examples && command.examples.length > 0
-            ? command.examples.map((e) => `\`${e}\``).join("\n")
-            : "Use slash or prefix syntax shown above."
+        value: command.examples && command.examples.length > 0 ? command.examples.map((e) => `\`${e}\``).join("\n") : "Use slash or prefix syntax shown above."
       }
     );
 }
 
 export async function handleHelpSelect(interaction: StringSelectMenuInteraction) {
   const [prefix, kind, ownerId] = interaction.customId.split(":");
-  if (prefix !== "help" || kind !== "select" || !ownerId) {
-    return false;
-  }
+  if (prefix !== "help" || kind !== "select" || !ownerId) return false;
 
   if (interaction.user.id !== ownerId) {
     await interaction.reply({
@@ -264,16 +346,14 @@ export async function handleHelpSelect(interaction: StringSelectMenuInteraction)
     return true;
   }
 
-  const selected = interaction.values[0] as HelpCategory;
+  const selected = (interaction.values[0] ?? "overview") as HelpSection;
   await interaction.update(buildHelpMessage(selected, ownerId, 0));
   return true;
 }
 
 export async function handleHelpButton(interaction: ButtonInteraction) {
-  const [prefix, kind, ownerId, rawCategory, rawPage, action] = interaction.customId.split(":");
-  if (prefix !== "help" || kind !== "nav" || !ownerId || !rawCategory || !rawPage || !action) {
-    return false;
-  }
+  const [prefix, kind, ownerId, rawSection, rawPage, action] = interaction.customId.split(":");
+  if (prefix !== "help" || kind !== "nav" || !ownerId || !rawSection || !rawPage || !action) return false;
 
   if (interaction.user.id !== ownerId) {
     await interaction.reply({
@@ -288,33 +368,31 @@ export async function handleHelpButton(interaction: ButtonInteraction) {
     return true;
   }
 
-  const category = rawCategory as HelpCategory;
-  const currentPage = Number.parseInt(rawPage, 10);
-  const safeCurrentPage = Number.isFinite(currentPage) ? currentPage : 0;
+  const section = rawSection as HelpSection;
+  const current = Number.parseInt(rawPage, 10);
+  const safeCurrent = Number.isFinite(current) ? current : 0;
 
   if (action === "home") {
     await interaction.update(buildHelpMessage("overview", ownerId, 0));
     return true;
   }
 
-  if (category === "overview") {
+  if (section === "overview") {
     await interaction.deferUpdate();
     return true;
   }
 
-  const pageCount = getCategoryPages(category as Exclude<HelpCategory, "overview">).length;
-
-  const targetPage =
+  const pageCount = getSectionPages(section as Exclude<HelpSection, "overview">).length;
+  const target =
     action === "first"
       ? 0
       : action === "last"
         ? pageCount - 1
         : action === "next"
-          ? safeCurrentPage + 1
-          : safeCurrentPage - 1;
+          ? safeCurrent + 1
+          : safeCurrent - 1;
+  const safePage = Math.max(0, Math.min(target, pageCount - 1));
 
-  const safePage = Math.max(0, Math.min(targetPage, pageCount - 1));
-
-  await interaction.update(buildHelpMessage(category, ownerId, safePage));
+  await interaction.update(buildHelpMessage(section, ownerId, safePage));
   return true;
 }

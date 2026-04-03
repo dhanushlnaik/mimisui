@@ -84,6 +84,7 @@ export const commandCatalog: CommandDoc[] = [
   { name: "dog", description: "Random dog image + fact", category: "fun", slash: "/dog", prefix: "dog", aliases: ["doggo", "doggie", "doggies"] },
   { name: "cat", description: "Random cat image + fact", category: "fun", slash: "/cat", prefix: "cat", aliases: ["catto", "cattie"] },
   { name: "poke", description: "Poke a user", category: "fun", slash: "/poke <user>", prefix: "poke @user" },
+  { name: "action", description: "Run any Weeby action GIF by type", category: "fun", slash: "/action <type> [user]", prefix: "-", aliases: ["act"] },
   { name: "hug", description: "Hug a user with GIF", category: "fun", slash: "/hug [user]", prefix: "hug [@user]" },
   { name: "pat", description: "Pat a user with GIF", category: "fun", slash: "/pat [user]", prefix: "pat [@user]" },
   { name: "kiss", description: "Kiss a user with GIF", category: "fun", slash: "/kiss [user]", prefix: "kiss [@user]" },
