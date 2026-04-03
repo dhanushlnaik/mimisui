@@ -3,7 +3,7 @@
 import { authClient } from "@/lib/auth-client";
 import { PrimaryButton, SecondaryButton } from "./ui";
 
-export function AuthControls() {
+export function AuthControls({ compact = false }: { compact?: boolean }) {
   const { data: session, isPending } = authClient.useSession();
 
   if (isPending) {
@@ -13,6 +13,7 @@ export function AuthControls() {
   if (!session) {
     return (
       <PrimaryButton
+        className={compact ? "h-8 px-3 py-1 text-xs" : ""}
         onClick={async () => {
           await authClient.signIn.social({
             provider: "discord",
@@ -27,8 +28,9 @@ export function AuthControls() {
 
   return (
     <div className="flex items-center gap-3">
-      <span className="text-sm text-muted-foreground">Signed in as {session.user.name}</span>
+      {!compact ? <span className="text-sm text-muted-foreground">Signed in as {session.user.name}</span> : null}
       <SecondaryButton
+        className={compact ? "h-8 px-3 py-1 text-xs" : ""}
         onClick={async () => {
           await authClient.signOut({
             fetchOptions: {

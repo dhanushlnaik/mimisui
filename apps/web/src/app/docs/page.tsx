@@ -1,84 +1,34 @@
 import Link from "next/link";
-import { SecondaryButton } from "@/components/ui";
-
-const sections = [
-  {
-    title: "Setup",
-    items: [
-      "Monorepo install and environment setup",
-      "Prisma client generation and schema push",
-      "Bot command registration + startup"
-    ]
-  },
-  {
-    title: "Family System",
-    items: [
-      "Partner/sibling relationships",
-      "Bond XP, levels, and score progression",
-      "Quest and achievement flows"
-    ]
-  },
-  {
-    title: "Family Simulation",
-    items: [
-      "Season start/end and ladder operations",
-      "Duel, streaks, milestones, and rewards",
-      "Audit logs and moderation controls"
-    ]
-  },
-  {
-    title: "Operations",
-    items: [
-      "Ubuntu + PM2 deployment",
-      "Crash protection and restart behavior",
-      "Troubleshooting known runtime issues"
-    ]
-  }
-];
+import { DataTableCard } from "@/components/dashboard/data-table-card";
+import { EmptyState } from "@/components/dashboard/empty-state";
+import { flattenDocTree } from "@/lib/docs-tree";
 
 export default function DocsPage() {
+  const flat = flattenDocTree();
+  const quickStart = flat.slice(0, 10);
+
   return (
-    <main className="mesh-layer mx-auto max-w-6xl px-4 py-12">
-      <section className="glass-card p-8 md:p-10">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="persona-title text-4xl md:text-5xl">CoCo-sui Docs</h1>
-            <p className="mt-3 max-w-3xl text-muted-foreground">
-              Product-level docs for the bot, dashboard, family progression system, simulation ladder,
-              admin controls, anti-abuse, and deployment.
-            </p>
-          </div>
-          <div className="flex gap-2">
-            <Link href="/">
-              <SecondaryButton>Home</SecondaryButton>
-            </Link>
-            <Link href="/dashboard">
-              <SecondaryButton>Dashboard</SecondaryButton>
-            </Link>
-          </div>
-        </div>
-      </section>
+    <div className="space-y-4">
+      <DataTableCard title="Quick Setup Flow" count={quickStart.length} toolbar={<span className="pill">Start Here</span>}>
+        <ol className="space-y-2 text-sm text-muted-foreground">
+          {quickStart.map((node, idx) => (
+            <li key={node.href} className="rounded-lg border border-border/70 bg-card/70 px-3 py-2">
+              <p className="font-medium text-foreground">
+                {idx + 1}. {node.title}
+              </p>
+              <p className="mt-1">{node.summary}</p>
+              <Link href={node.href as any} className="mt-2 inline-block text-xs text-primary hover:underline">
+                Dive in →
+              </Link>
+            </li>
+          ))}
+        </ol>
+      </DataTableCard>
 
-      <section className="mt-6 grid gap-4 md:grid-cols-2">
-        {sections.map((section) => (
-          <article key={section.title} className="glass-card dash-grid p-5">
-            <h2 className="dec-title text-2xl">{section.title}</h2>
-            <ul className="mt-3 space-y-2 text-sm text-muted-foreground">
-              {section.items.map((item) => (
-                <li key={item}>- {item}</li>
-              ))}
-            </ul>
-          </article>
-        ))}
-      </section>
-
-      <section className="mt-6 glass-card p-5">
-        <h2 className="dec-title text-2xl">Source Docs</h2>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Full markdown docs are stored in the repo <code>docs/</code> directory and track current
-          implementation details and commands.
-        </p>
-      </section>
-    </main>
+      <EmptyState
+        title="Need the tea, not just the docs?"
+        description="Use the left tree to jump to exact workflows. Every node is deep-linkable so you can share help pages with your admins instantly."
+      />
+    </div>
   );
 }

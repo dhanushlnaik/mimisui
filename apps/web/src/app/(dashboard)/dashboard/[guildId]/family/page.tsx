@@ -1,6 +1,9 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { SecondaryButton, Card } from "@/components/ui";
+import { SecondaryButton } from "@/components/ui";
+import { ChartCard } from "@/components/dashboard/chart-card";
+import { DataTableCard } from "@/components/dashboard/data-table-card";
+import { KpiCard } from "@/components/dashboard/kpi-card";
 import { getServerSession } from "@/server/session";
 import { getGuildFamilyDashboard } from "@/lib/family-dashboard";
 import { FamilyAdminPanel } from "@/components/family-admin-panel";
@@ -24,7 +27,7 @@ export default async function GuildFamilyPage({
   }
 
   return (
-    <main className="mesh-layer mx-auto max-w-6xl px-4 py-10">
+    <main className="dashboard-shell mesh-layer">
       <section className="glass-card p-6 md:p-8">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
@@ -53,31 +56,15 @@ export default async function GuildFamilyPage({
       </section>
 
       {dashboard.viewer ? (
-        <section className="mt-6 grid gap-4 md:grid-cols-2">
-          <Card className="glass-card">
-            <h2 className="dec-title text-xl">Your Family Snapshot</h2>
-            <p className="mt-2 text-sm text-muted-foreground">
-              Partner: <span className="font-medium text-foreground">{dashboard.viewer.partnerName ?? "None"}</span>
-            </p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Bond Level: <span className="font-medium text-foreground">{dashboard.viewer.bondLevel}</span> • Bond Score:{" "}
-              <span className="font-medium text-foreground">{dashboard.viewer.bondScore}</span>
-            </p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Total Dates: <span className="font-medium text-foreground">{dashboard.viewer.totalDates}</span> • Siblings:{" "}
-              <span className="font-medium text-foreground">{dashboard.viewer.siblingCount}</span>
-            </p>
-          </Card>
-          <Card className="glass-card dash-grid">
-            <h2 className="dec-title text-xl">Parity Notes</h2>
-            <p className="mt-2 text-sm text-muted-foreground">
-              This page now includes read parity (profiles, ladder, logs) and action parity (season/ladder ops, penalties, and user claims).
-            </p>
-          </Card>
+        <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <KpiCard title="Partner" value={dashboard.viewer.partnerName ?? "None"} trend="flat" />
+          <KpiCard title="Bond Level" value={dashboard.viewer.bondLevel} trend="up" />
+          <KpiCard title="Bond Score" value={dashboard.viewer.bondScore} trend="up" />
+          <KpiCard title="Total Dates" value={dashboard.viewer.totalDates} delta={`Siblings ${dashboard.viewer.siblingCount}`} trend="flat" />
         </section>
       ) : null}
 
-      <section className="mt-6">
+      <section>
         <GuildFamilySettingsPanel
           guildId={guildId}
           initialSettings={{
@@ -94,14 +81,13 @@ export default async function GuildFamilyPage({
         />
       </section>
 
-      <section className="mt-6">
+      <section>
         <FamilyAdminPanel guildId={guildId} />
       </section>
 
-      <section className="mt-6 grid gap-4 lg:grid-cols-2">
-        <Card className="glass-card">
-          <h3 className="dec-title text-xl">Top Couples (Bond)</h3>
-          <div className="mt-3 space-y-2 text-sm">
+      <section className="grid gap-4 lg:grid-cols-2">
+        <DataTableCard title="Top Couples (Bond)" count={dashboard.topCouples.length}>
+          <div className="space-y-2 text-sm">
             {dashboard.topCouples.length === 0 ? (
               <p className="text-muted-foreground">No active couples yet.</p>
             ) : (
@@ -117,11 +103,10 @@ export default async function GuildFamilyPage({
               ))
             )}
           </div>
-        </Card>
+        </DataTableCard>
 
-        <Card className="glass-card">
-          <h3 className="dec-title text-xl">Season Ladder</h3>
-          <div className="mt-3 space-y-2 text-sm">
+        <DataTableCard title="Season Ladder" count={dashboard.ladder.length}>
+          <div className="space-y-2 text-sm">
             {dashboard.ladder.length === 0 ? (
               <p className="text-muted-foreground">No ladder entries yet.</p>
             ) : (
@@ -137,13 +122,12 @@ export default async function GuildFamilyPage({
               ))
             )}
           </div>
-        </Card>
+        </DataTableCard>
       </section>
 
-      <section className="mt-6 grid gap-4 lg:grid-cols-2">
-        <Card className="glass-card">
-          <h3 className="dec-title text-xl">Active Penalty Flags</h3>
-          <div className="mt-3 space-y-2 text-sm">
+      <section className="grid gap-4 lg:grid-cols-2">
+        <DataTableCard title="Active Penalty Flags" count={dashboard.flags.length}>
+          <div className="space-y-2 text-sm">
             {dashboard.flags.length === 0 ? (
               <p className="text-muted-foreground">No active flags.</p>
             ) : (
@@ -155,11 +139,10 @@ export default async function GuildFamilyPage({
               ))
             )}
           </div>
-        </Card>
+        </DataTableCard>
 
-        <Card className="glass-card">
-          <h3 className="dec-title text-xl">Moderation Logs</h3>
-          <div className="mt-3 space-y-2 text-sm">
+        <DataTableCard title="Moderation Logs" count={dashboard.logs.length}>
+          <div className="space-y-2 text-sm">
             {dashboard.logs.length === 0 ? (
               <p className="text-muted-foreground">No moderation logs for this guild yet.</p>
             ) : (
@@ -173,13 +156,16 @@ export default async function GuildFamilyPage({
               ))
             )}
           </div>
-        </Card>
+        </DataTableCard>
       </section>
 
-      <section className="mt-6">
-        <Card className="glass-card">
-          <h3 className="dec-title text-xl">Settings History</h3>
-          <div className="mt-3 space-y-2 text-sm">
+      <section>
+        <ChartCard
+          title="Settings History"
+          description="Latest dashboard-side configuration changes with key-level diffs."
+          actions={<span className="pill">WEB_GUILD_SETTINGS_UPDATE</span>}
+        >
+          <div className="space-y-2 text-sm">
             {dashboard.logs.filter((row: any) => row.action === "WEB_GUILD_SETTINGS_UPDATE").length === 0 ? (
               <p className="text-muted-foreground">No web settings changes logged yet.</p>
             ) : (
@@ -211,7 +197,7 @@ export default async function GuildFamilyPage({
                 })
             )}
           </div>
-        </Card>
+        </ChartCard>
       </section>
     </main>
   );
