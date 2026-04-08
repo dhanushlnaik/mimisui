@@ -1,54 +1,212 @@
-# Commands Reference
+# MiMisui Commands
 
-## Family Core
+## Slash Commands
 
-Primary user-facing commands (slash + prefix parity where implemented):
+- `/ping` — Check bot latency
+- `/botstats` — Runtime metrics snapshot for admins
+- `/reloadcommands <scope> [guild_id]` — Re-register slash commands (guild/global)
+- `/avatar [user] [user2]` — Show single avatar or shared avatars
+- `/serverav [user]` — Show server-specific avatar
+- `/banner [user]` — Show user banner
+- `/userinfo [user]` — Show user info with roles
+- `/serverinfo` — Show server info
+- `/users` — Show total server members
+- `/enlarge <emoji>` — Enlarge a custom emoji
+- `/splitimg <image>` — Split image into left/right halves
+- `/multipfp [user1..user6]` — Merge multiple user avatars
+- `/afk [reason]` — Set your AFK status and reason
+- `/prefix get | /prefix set <value>` — Get/set server prefix
+- `/config <module> <enabled>` — Toggle modules for a guild
+- `/help [command]` — Interactive command guide with categories
+- `/marry <user>` — Marry another user !
+- `/divorce` — Take a Divorce!
+- `/partner` — Check your Marital Status.
+- `/date` — Claim UwU Points by Dating.
+- `/familysim` — Run relationship simulation outcomes.
+- `/familysimstats` — View simulation history analytics.
+- `/familysimmilestones` — View simulation milestone board.
+- `/familysimladder` — View weekly simulation ladder.
+- `/familysimduel <user>` — Duel another active couple.
+- `/familysimduelhistory` — View your recent duel history.
+- `/familysimseason` — View current simulation season.
+- `/familysimseasonclaim` — Claim previous season rewards.
+- `/familysimseasonstart [season_key]` — Admin: force start/reset simulation season.
+- `/familysimseasonend [season_key]` — Admin: force end simulation season.
+- `/familysimladderreset [season_key]` — Admin: reset seasonal simulation ladder.
+- `/familysimladderrecompute [season_key]` — Admin: recompute ladder tiers from points.
+- `/familysimaudit [limit]` — Admin: anti-abuse logs and active penalties.
+- `/familysimpenaltyclear [flag_id] [user] [relationship_id] [all]` — Admin: clear active anti-abuse penalty flags.
+- `/familysimadminpanel` — Admin: interactive sim operations panel.
+- `/familysimpanel` — Open interactive simulation panel.
+- `/anniversary` — View anniversary and days together
+- `/anniversaryclaim` — Claim monthly anniversary rewards.
+- `/familyevent` — View this week's family event bonus.
+- `/familyprofile [user]` — Check your Family.
+- `/siblings` — Check Your Siblings.
+- `/siblingadd <user>` — Make someone your Sibling
+- `/siblingremove <user>` — Disown Your Sister.
+- `/coupleleaderboard` — Shows Leadeboard for UwU points.
+- `/familyleaderboard` — Shows Leadeboard for UwU points.
+- `/bondstatus <user>` — Check bond stats with someone.
+- `/familyquests` — View family relationship quests.
+- `/familyachievements` — View permanent family achievements.
+- `/familyachieveclaim [key]` — Claim completed family achievements.
+- `/profile [user] [card]` — View XP/coins/title profile and rank card
+- `/daily` — Claim daily XP and coins
+- `/quests` — View daily and weekly quests
+- `/leaderboard` — Server XP leaderboard
+- `/shop` — View progression shop catalog
+- `/relationshipshop` — View relationship item shop.
+- `/relationshipinventory` — View relationship inventory.
+- `/relationshipbuy <item> [quantity]` — Buy relationship items.
+- `/relationshipuse <item>` — Use relationship item.
+- `/shiprate <name1> <name2>` — Ship two names and get compatibility %
+- `/eightball <question>` — Magic 8-ball response
+- `/gay [name]` — Gay scanner
+- `/insult [user]` — Yo momma joke
+- `/say <text>` — Make bot say text
+- `/dog` — Random dog image + fact
+- `/cat` — Random cat image + fact
+- `/poke <user>` — Poke a user
+- `/action <type> [user]` — Run any Weeby action GIF by type
+- `/hug [user]` — Hug a user with GIF
+- `/pat [user]` — Pat a user with GIF
+- `/kiss [user]` — Kiss a user with GIF
+- `/cuddle [user]` — Cuddle a user with GIF
+- `/slap [user]` — Slap a user with GIF
+- `/highfive [user]` — High five a user with GIF
+- `/bonk [user]` — Bonk a user with GIF
+- `/tickle [user]` — Tickle a user with GIF
+- `/wink [user]` — Wink at a user with GIF
+- `/owo <text>` — Owoify text
+- `/dare` — Random dare question
+- `/truth` — Random truth question
+- `/wyr` — Would You Rather question
+- `/nhie` — Never Have I Ever question
+- `/urban <term>` — Urban dictionary lookup
+- `/rps <choice>` — Rock Paper Scissors
+- `/randomresponse <type> [number] [quote_card]` — Random JSON responses with next/refresh buttons
+- `/triggered [user] [tint]` — Generate triggered GIF from avatar
+- `/thisisspotify [text] [color] [user]` — Generate This Is Spotify style image
+- `/tweet [text] [message_link] [username] [user]` — Generate fake tweet image (supports message link/reply)
+- `Apps -> Message -> Tweet This` — Context menu: turn any message into tweet image
+- `/spotifynp [title] [artist] [album] [user]` — Generate Spotify now playing card
+- `/uk07 [text] [message_link]` — Generate UK07 style caption image
+- `/quote [text] [message_link] [author] [user]` — Generate quote card (supports message link/reply)
+- `Apps -> Message -> Quote This` — Context menu: turn any message into quote image
+- `/eject [text] [outcome] [user]` — Among Us eject meme
+- `/ship [user1] [user2]` — Generate friendship banner
+- `/demotivational [title] <text> [user]` — Generate demotivational poster
+- `/rip [user] [message]` — Generate RIP gravestone meme
+- `/simp [user]` — Generate custom simp ID card
+- `/petpet [user]` — Generate pet-pet GIF
+- `/avsplit [user1] [user2]` — Combine two avatars side-by-side
+- `/achievement <text> [user]` — Generate achievement image + text
+- `/bartchalkboard <text> [user]` — Generate Bart chalkboard image + text
+- `/changemymind <text> [user]` — Generate Change My Mind image + text
+- `/lisapresentation <text> [user]` — Generate Lisa presentation image + text
+- `/jimwhiteboard <text> [user]` — Generate Jim whiteboard image + text
+- `/approved /bazinga ... /wasted [user]` — Avatar overlays (approved, bazinga, caution, christmas, easter, fire, glass, halloween, hearts, jail, rainbow, rejected, snow, thuglife, balance, brilliance, bravery, wasted)
 
-- `marry`
-- `divorce`
-- `date`
-- `partner`
-- `siblings`
-- `siblingadd`
-- `siblingremove`
-- `familyprofile`
-- `bondstatus`
-- `familyquests`
-- `familyachievements`
-- `familyachieveclaim`
-- `coupleleaderboard`
-- `familyleaderboard`
+## Prefix Commands
 
-## Family Simulation
-
-- `familysim`
-- `familysimstats`
-- `familysimmilestones`
-- `familysimladder`
-- `familysimduel`
-- `familysimduelhistory`
-- `familysimseason`
-- `familysimseasonclaim`
-
-## Admin Family Simulation
-
-- `familysimseasonstart`
-- `familysimseasonend`
-- `familysimladderreset`
-- `familysimladderrecompute`
-- `familysimaudit`
-- `familysimpenaltyclear`
-- `familysimadminpanel`
-
-## Prefix Patterns
-
-Both forms are supported for family namespaced flow:
-
-- direct: `!marry @user`
-- namespaced: `!family marry @user`
-
-## Command UX Principles
-
-- Legacy-style wording/layout is preserved for family responses where requested.
-- Usage and fallback embeds are themed, not raw text-only errors.
-- Buttons/modals are used for confirmations and admin actions.
+- `ping` — Check bot latency
+- `avatar [@user1] [@user2]` — Show single avatar or shared avatars
+- `serverav [@user]` — Show server-specific avatar
+- `banner [@user]` — Show user banner
+- `userinfo [@user]` — Show user info with roles
+- `serverinfo` — Show server info
+- `users` — Show total server members
+- `enlarge <emoji>` — Enlarge a custom emoji
+- `splitimg (with image attachment)` — Split image into left/right halves
+- `multipfp @u1 @u2 ...` — Merge multiple user avatars
+- `afk [reason]` — Set your AFK status and reason
+- `prefix get | prefix set <value>` — Get/set server prefix
+- `config <module> <on|off>` — Toggle modules for a guild
+- `help [category|command]` — Interactive command guide with categories
+- `family <command>` — Family hub (prefix namespace alias)
+- `marry @user | family marry @user` — Marry another user !
+- `divorce | family divorce` — Take a Divorce!
+- `partner | family partner` — Check your Marital Status.
+- `date | family date` — Claim UwU Points by Dating.
+- `familysim | family familysim | family sim` — Run relationship simulation outcomes.
+- `familysimstats | family familysimstats | family simstats` — View simulation history analytics.
+- `familysimmilestones | family familysimmilestones | family simmilestones` — View simulation milestone board.
+- `familysimladder | family familysimladder | family simladder` — View weekly simulation ladder.
+- `familysimduel @user | family familysimduel @user` — Duel another active couple.
+- `familysimduelhistory | family familysimduelhistory` — View your recent duel history.
+- `familysimseason | family familysimseason` — View current simulation season.
+- `familysimseasonclaim | family familysimseasonclaim` — Claim previous season rewards.
+- `familysimseasonstart [season_key] | family familysimseasonstart [season_key]` — Admin: force start/reset simulation season.
+- `familysimseasonend [season_key] | family familysimseasonend [season_key]` — Admin: force end simulation season.
+- `familysimladderreset [season_key] | family familysimladderreset [season_key]` — Admin: reset seasonal simulation ladder.
+- `familysimladderrecompute [season_key] | family familysimladderrecompute [season_key]` — Admin: recompute ladder tiers from points.
+- `familysimaudit | family familysimaudit` — Admin: anti-abuse logs and active penalties.
+- `familysimpenaltyclear [all|flag <id>|@user|rel <relationshipId>] | family familysimpenaltyclear ...` — Admin: clear active anti-abuse penalty flags.
+- `familysimadminpanel | family familysimadminpanel` — Admin: interactive sim operations panel.
+- `familysimpanel | family familysimpanel | family simpanel` — Open interactive simulation panel.
+- `anniversary | family anniversary` — View anniversary and days together
+- `anniversaryclaim | family anniversaryclaim` — Claim monthly anniversary rewards.
+- `familyevent | family familyevent` — View this week's family event bonus.
+- `familyprofile [@user] | family profile [@user]` — Check your Family.
+- `siblings | family siblings` — Check Your Siblings.
+- `siblingadd @user | family siblingadd @user` — Make someone your Sibling
+- `siblingremove @user | family siblingremove @user` — Disown Your Sister.
+- `coupleleaderboard | family coupleleaderboard` — Shows Leadeboard for UwU points.
+- `familyleaderboard | family leaderboard` — Shows Leadeboard for UwU points.
+- `bondstatus @user | family bondstatus @user` — Check bond stats with someone.
+- `familyquests | family familyquests` — View family relationship quests.
+- `familyachievements | family familyachievements` — View permanent family achievements.
+- `familyachieveclaim [key] | family familyachieveclaim [key]` — Claim completed family achievements.
+- `profile [@user]` — View XP/coins/title profile and rank card
+- `daily` — Claim daily XP and coins
+- `quests` — View daily and weekly quests
+- `leaderboard` — Server XP leaderboard
+- `shop` — View progression shop catalog
+- `relationshipshop` — View relationship item shop.
+- `relationshipinventory` — View relationship inventory.
+- `relationshipbuy <item> [quantity]` — Buy relationship items.
+- `relationshipuse <item>` — Use relationship item.
+- `shiprate <name1> <name2>` — Ship two names and get compatibility %
+- `eightball <question>` — Magic 8-ball response
+- `gay [name]` — Gay scanner
+- `insult [@user]` — Yo momma joke
+- `say <text>` — Make bot say text
+- `dog` — Random dog image + fact
+- `cat` — Random cat image + fact
+- `poke @user` — Poke a user
+- `hug [@user]` — Hug a user with GIF
+- `pat [@user]` — Pat a user with GIF
+- `kiss [@user]` — Kiss a user with GIF
+- `cuddle [@user]` — Cuddle a user with GIF
+- `slap [@user]` — Slap a user with GIF
+- `highfive [@user]` — High five a user with GIF
+- `bonk [@user]` — Bonk a user with GIF
+- `tickle [@user]` — Tickle a user with GIF
+- `wink [@user]` — Wink at a user with GIF
+- `owo <text>` — Owoify text
+- `dare` — Random dare question
+- `truth` — Random truth question
+- `wyr` — Would You Rather question
+- `nhie` — Never Have I Ever question
+- `urban <term>` — Urban dictionary lookup
+- `rps <choice>` — Rock Paper Scissors
+- `triggered [@user]` — Generate triggered GIF from avatar
+- `thisisspotify [@user] [text] [| hex]` — Generate This Is Spotify style image
+- `tweet (reply to a message) or tweet [@user] [text]` — Generate fake tweet image (supports message link/reply)
+- `spotifynp [@user] [title | artist | album]` — Generate Spotify now playing card
+- `uk07 <text> or reply + uk07` — Generate UK07 style caption image
+- `quote (reply to a message) or quote [@user] [text] [| author]` — Generate quote card (supports message link/reply)
+- `eject [@user] [text] [outcome]` — Among Us eject meme
+- `ship [@user1] [@user2]` — Generate friendship banner
+- `demotivational [@user] <text> [| title]` — Generate demotivational poster
+- `rip [@user] [message]` — Generate RIP gravestone meme
+- `simp [@user]` — Generate custom simp ID card
+- `petpet [@user]` — Generate pet-pet GIF
+- `avsplit [@user1] [@user2]` — Combine two avatars side-by-side
+- `achievement [@user] <text>` — Generate achievement image + text
+- `bartchalkboard [@user] <text>` — Generate Bart chalkboard image + text
+- `changemymind [@user] <text>` — Generate Change My Mind image + text
+- `lisapresentation [@user] <text>` — Generate Lisa presentation image + text
+- `jimwhiteboard [@user] <text>` — Generate Jim whiteboard image + text
+- `approved|bazinga|...|wasted [@user]` — Avatar overlays (approved, bazinga, caution, christmas, easter, fire, glass, halloween, hearts, jail, rainbow, rejected, snow, thuglife, balance, brilliance, bravery, wasted)

@@ -77,6 +77,7 @@ export const commandCatalog: CommandDoc[] = [
   { name: "relationshipbuy", description: "Buy relationship items.", category: "social", slash: "/relationshipbuy <item> [quantity]", prefix: "relationshipbuy <item> [quantity]", aliases: ["rbuy"] },
   { name: "relationshipuse", description: "Use relationship item.", category: "social", slash: "/relationshipuse <item>", prefix: "relationshipuse <item>", aliases: ["ruse"] },
   { name: "shiprate", description: "Ship two names and get compatibility %", category: "fun", slash: "/shiprate <name1> <name2>", prefix: "shiprate <name1> <name2>", aliases: ["shipping"] },
+  { name: "flames", description: "Animated FLAMES compatibility reveal", category: "fun", slash: "/flames [user1] [user2]", prefix: "flames @user | flames @user1 @user2", aliases: ["flame"] },
   { name: "eightball", description: "Magic 8-ball response", category: "fun", slash: "/eightball <question>", prefix: "eightball <question>", aliases: ["8ball", "tellme", "isittrue"] },
   { name: "gay", description: "Gay scanner", category: "fun", slash: "/gay [name]", prefix: "gay [name]", aliases: ["gayscanner"] },
   { name: "insult", description: "Yo momma joke", category: "fun", slash: "/insult [user]", prefix: "insult [@user]", aliases: ["mommajokes"] },

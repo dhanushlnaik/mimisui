@@ -1,5 +1,12 @@
 import { AttachmentBuilder, EmbedBuilder, MessageFlags, SlashCommandBuilder } from "discord.js";
 import { C_MAIN } from "../lib/colors.js";
+import {
+  formatCancelledArray,
+  formatFlamesStep,
+  getFlamesProcess,
+  normalizeFlamesName,
+  wait
+} from "../lib/flames.js";
 import { avatarSplitFromUrls } from "../lib/rich-media.js";
 import { getAvatarUrl } from "../lib/user-avatar.js";
 import {
@@ -11,7 +18,7 @@ import {
   textToOwo
 } from "../lib/fun-utils.js";
 import { awardPartnerActionBond } from "../lib/family.js";
-import { callWeebyGif } from "../lib/weeby.js";
+import { callWeebyGenerator, callWeebyGif, weebyAttachment } from "../lib/weeby.js";
 import type { SlashCommand } from "../types/command.js";
 
 const melon = 0xf88379;
@@ -512,8 +519,189 @@ const rpsCommand: SlashCommand = {
   }
 };
 
+const flamesCommand: SlashCommand = {
+  data: new SlashCommandBuilder()
+    .setName("flames")
+    .setDescription("Reveal FLAMES result with step-by-step animation")
+    .addUserOption((o) => o.setName("user1").setDescription("First user"))
+    .addUserOption((o) => o.setName("user2").setDescription("Second user"))
+    .addStringOption((o) => o.setName("name1").setDescription("First name (optional)"))
+    .addStringOption((o) => o.setName("name2").setDescription("Second name (optional)")),
+  async execute(interaction) {
+    const user1 = interaction.options.getUser("user1");
+    const user2 = interaction.options.getUser("user2");
+    const argName1 = interaction.options.getString("name1");
+    const argName2 = interaction.options.getString("name2");
+
+    const firstName = argName1 ?? user1?.displayName ?? interaction.user.displayName;
+    const secondName = argName2 ?? user2?.displayName ?? user1?.displayName ?? "mystery";
+    const leftLabel = user2 ? firstName : `${interaction.user.displayName}`;
+    const rightLabel = secondName;
+    const leftDisplay = user2 ? firstName : interaction.user.displayName;
+    const rightDisplay = user2 ? secondName : secondName;
+    const firstVisualUser = user2 ? (user1 ?? interaction.user) : user1 ? interaction.user : null;
+    const secondVisualUser = user2 ? user2 : user1 ?? null;
+
+    const clean1 = normalizeFlamesName(leftDisplay);
+    const clean2 = normalizeFlamesName(rightDisplay);
+    if (!clean1 || !clean2) {
+      await interaction.reply({
+        content: "Both names need valid alphabet letters.",
+        flags: MessageFlags.Ephemeral
+      });
+      return;
+    }
+
+    const process = getFlamesProcess(leftDisplay, rightDisplay);
+    const makeEmbed = (title: string, description: string) =>
+      new EmbedBuilder().setColor(0xf72585).setTitle(title).setDescription(description);
+
+    await interaction.reply({
+      embeds: [
+        makeEmbed(
+          "FLAMES Calculator",
+          `Starting FLAMES for **${leftLabel}** × **${rightLabel}**...\n\nPreparing names...`
+        )
+      ]
+    });
+
+    await wait(900);
+
+    await interaction.editReply({
+      embeds: [
+        makeEmbed(
+          "FLAMES Calculator",
+          `**Original Names**\n**${leftLabel}**\n**${rightLabel}**\n\n**Normalized**\n\`${process.normalized1}\`\n\`${process.normalized2}\``
+        )
+      ]
+    });
+
+    await wait(1000);
+
+    const cancelSteps = process.cancelSteps.slice(0, 8);
+    for (let i = 0; i < cancelSteps.length; i++) {
+      const step = cancelSteps[i]!;
+      await interaction.editReply({
+        embeds: [
+          makeEmbed(
+            `Cancelling Letters (${i + 1}/${process.cancelSteps.length})`,
+            `Removing common letter: **${step.matched}**\n\n**${leftLabel}**\n${formatCancelledArray(step.name1After)}\n\n**${rightLabel}**\n${formatCancelledArray(step.name2After)}`
+          )
+        ]
+      });
+      await wait(850);
+    }
+
+    if (process.cancelSteps.length > cancelSteps.length) {
+      await interaction.editReply({
+        embeds: [
+          makeEmbed(
+            "Cancelling Letters",
+            `Processed first **${cancelSteps.length}** live steps.\nRemaining cancellations were summarized to keep this smooth.`
+          )
+        ]
+      });
+      await wait(800);
+    }
+
+    await interaction.editReply({
+      embeds: [
+        makeEmbed(
+          "Remaining Letters",
+          `**${leftLabel}** → \`${process.remaining1 || "none"}\`\n**${rightLabel}** → \`${process.remaining2 || "none"}\`\n\nTotal remaining count = **${process.count}**`
+        )
+      ]
+    });
+
+    await wait(1000);
+
+    for (let i = 0; i < process.flamesSteps.length; i++) {
+      const step = process.flamesSteps[i]!;
+      await interaction.editReply({
+        embeds: [
+          makeEmbed(
+            `FLAMES Round ${i + 1}`,
+            `Count = **${process.count}**\n\n${formatFlamesStep(step.before, step.removed)}\n\nRemoved: **${step.removed}**\nRemaining: **${step.after.join(" ")}**`
+          )
+        ]
+      });
+      await wait(900);
+    }
+
+    const reactionMap: Record<string, string> = {
+      Friends: "bestie zone unlocked",
+      Love: "ok this one has lore",
+      Affection: "soft vibes only",
+      Marriage: "bro skipped to endgame",
+      Enemies: "nah this turned toxic",
+      Siblings: "most painful result possible"
+    };
+
+    const finalEmbed = makeEmbed(
+      "FLAMES Result",
+      `**${leftLabel} × ${rightLabel}**\n\nFinal Letter: **${process.finalLetter}**\nResult: **${process.finalResult}**\n\n_${reactionMap[process.finalResult] ?? "fate has spoken"}_`
+    );
+
+    if (firstVisualUser && secondVisualUser) {
+      const generatorMap: Record<string, string[]> = {
+        Friends: ["samepicture", "friendship"],
+        Love: ["simpleship", "ship", "crush", "friendship"],
+        Affection: ["cuddle", "friendship"],
+        Marriage: ["ship", "simpleship", "friendship"],
+        Enemies: ["batslap", "whowouldwin", "friendship"],
+        Siblings: ["samepicture", "friendship"]
+      };
+
+      const candidates = generatorMap[process.finalResult] ?? ["friendship"];
+      for (const generator of candidates) {
+        try {
+          const result =
+            generator === "friendship"
+              ? await callWeebyGenerator("friendship", {
+                  firstimage: getAvatarUrl(firstVisualUser),
+                  secondimage: getAvatarUrl(secondVisualUser),
+                  firsttext: firstVisualUser.displayName,
+                  secondtext: secondVisualUser.displayName
+                })
+              : await callWeebyGenerator(generator, {
+                  firstimage: getAvatarUrl(firstVisualUser),
+                  secondimage: getAvatarUrl(secondVisualUser)
+                });
+
+          finalEmbed.setImage(`attachment://${generator}.png`);
+          await interaction.editReply({
+            embeds: [finalEmbed],
+            files: [weebyAttachment(generator, result, "png")]
+          });
+          return;
+        } catch {
+          // try next candidate
+        }
+      }
+    }
+
+    try {
+      const gifMap: Record<string, string> = {
+        Friends: "highfive",
+        Love: "kiss",
+        Affection: "cuddle",
+        Marriage: "wedding",
+        Enemies: "slap",
+        Siblings: "handhold"
+      };
+      const gif = await callWeebyGif(gifMap[process.finalResult] ?? "wink");
+      finalEmbed.setImage(gif);
+    } catch {
+      // keep embed without image if provider fails
+    }
+
+    await interaction.editReply({ embeds: [finalEmbed] });
+  }
+};
+
 export const funCommands: SlashCommand[] = [
   shipRateCommand,
+  flamesCommand,
   eightBallCommand,
   gayCommand,
   insultCommand,

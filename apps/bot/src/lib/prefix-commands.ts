@@ -15,6 +15,13 @@ import {
 import { buildHelpMessage, type HelpSection } from "./help-view.js";
 import { getCurrentFamilyEvent } from "./family-events.js";
 import {
+  formatCancelledArray,
+  formatFlamesStep,
+  getFlamesProcess,
+  normalizeFlamesName,
+  wait
+} from "./flames.js";
+import {
   awardPartnerActionBond,
   awardDateInteraction,
   awardFamilySimulationInteraction,
@@ -127,6 +134,7 @@ const BASE_PREFIX_COMMANDS = [
   "splitimg",
   "multipfp",
   "shiprate",
+  "flames",
   "eightball",
   "gay",
   "insult",
@@ -223,15 +231,40 @@ function isManageGuild(message: Message) {
 }
 
 function pickSingleUser(message: Message, args: string[]) {
-  const mention = message.mentions.users.first();
+  const mention = getMentionedUsersInOrder(message)[0];
   if (mention && args[0]?.startsWith("<@")) {
     return { user: mention, rest: args.slice(1) };
   }
   return { user: message.author, rest: args };
 }
 
+function getMentionedUsersInOrder(message: Message): User[] {
+  const mentionMap = message.mentions.users;
+  const ordered: User[] = [];
+  const seen = new Set<string>();
+
+  for (const m of message.content.matchAll(/<@!?(\d+)>/g)) {
+    const id = m[1];
+    if (!id || seen.has(id)) continue;
+    const user = mentionMap.get(id);
+    if (!user) continue;
+    ordered.push(user);
+    seen.add(id);
+  }
+
+  if (ordered.length === 0) {
+    return [...mentionMap.values()];
+  }
+
+  for (const user of mentionMap.values()) {
+    if (!seen.has(user.id)) ordered.push(user);
+  }
+
+  return ordered;
+}
+
 function pickTwoUsers(message: Message, args: string[]) {
-  const mentioned = [...message.mentions.users.values()];
+  const mentioned = getMentionedUsersInOrder(message);
   let consumed = 0;
 
   let first: User = message.author;
@@ -256,6 +289,14 @@ function splitByPipe(text: string) {
     .split("|")
     .map((part) => part.trim())
     .filter(Boolean);
+}
+
+function buildShipName(a: string, b: string) {
+  const left = a.trim();
+  const right = b.trim();
+  const aHalf = Math.max(1, Math.ceil(left.length / 2));
+  const bHalf = Math.max(1, Math.floor(right.length / 2));
+  return `${left.slice(0, aHalf)}${right.slice(bHalf)}`;
 }
 
 function normalizeHex(input: string) {
@@ -337,7 +378,23 @@ async function fetchJson<T>(url: string) {
 }
 
 async function runPing({ message }: PrefixContext) {
-  await message.reply("Pong!");
+  const before = Date.now();
+  const msg = await message.reply("`🏓` **- Getting my ping ...**");
+  const commandLatency = Date.now() - before;
+  const gatewayLatency = Math.round(message.client.ws.ping);
+
+  const embed = new EmbedBuilder()
+    .setColor(0xf72585)
+    .setDescription(
+      `:heartpulse: Command: \`${commandLatency} ms\`\n:stopwatch: Gateway: \`${gatewayLatency} ms\``
+    )
+    .setAuthor({
+      name: message.client.user?.username ?? "MiMisui",
+      iconURL: message.client.user?.displayAvatarURL()
+    })
+    .setTimestamp();
+
+  await msg.edit({ content: "", embeds: [embed] });
 }
 
 async function runShipRate({ message, args }: PrefixContext) {
@@ -360,6 +417,187 @@ async function runShipRate({ message, args }: PrefixContext) {
         )
     ]
   });
+}
+
+async function runFlames({ message, args }: PrefixContext) {
+  const mentions = getMentionedUsersInOrder(message);
+  const parts = args.filter((arg) => !arg.startsWith("<@"));
+
+  let left = "";
+  let right = "";
+
+  if (mentions.length >= 2) {
+    left = mentions[0]?.displayName ?? message.author.displayName;
+    right = mentions[1]?.displayName ?? "mystery";
+  } else if (mentions.length === 1) {
+    left = message.author.displayName;
+    right = mentions[0]?.displayName ?? "mystery";
+  } else if (parts.length >= 2) {
+    left = parts[0] ?? "";
+    right = parts.slice(1).join(" ");
+  } else {
+    await message.reply("Usage: flames @user OR flames @user1 @user2");
+    return;
+  }
+
+  const clean1 = normalizeFlamesName(left);
+  const clean2 = normalizeFlamesName(right);
+  if (!clean1 || !clean2) {
+    await message.reply("Both names need valid alphabet letters.");
+    return;
+  }
+
+  const process = getFlamesProcess(left, right);
+  const makeEmbed = (title: string, description: string) =>
+    new EmbedBuilder().setColor(0xf72585).setTitle(title).setDescription(description);
+
+  const msg = await message.reply({
+    embeds: [makeEmbed("FLAMES Calculator", `Starting FLAMES for **${left}** × **${right}**...\n\nPreparing names...`)]
+  });
+
+  await wait(900);
+
+  await msg.edit({
+    embeds: [
+      makeEmbed(
+        "FLAMES Calculator",
+        `**Original Names**\n**${left}**\n**${right}**\n\n**Normalized**\n\`${process.normalized1}\`\n\`${process.normalized2}\``
+      )
+    ]
+  });
+
+  await wait(1000);
+
+  const cancelSteps = process.cancelSteps.slice(0, 8);
+  for (let i = 0; i < cancelSteps.length; i++) {
+    const step = cancelSteps[i]!;
+    await msg.edit({
+      embeds: [
+        makeEmbed(
+          `Cancelling Letters (${i + 1}/${process.cancelSteps.length})`,
+          `Removing common letter: **${step.matched}**\n\n**${left}**\n${formatCancelledArray(step.name1After)}\n\n**${right}**\n${formatCancelledArray(step.name2After)}`
+        )
+      ]
+    });
+    await wait(850);
+  }
+
+  if (process.cancelSteps.length > cancelSteps.length) {
+    await msg.edit({
+      embeds: [
+        makeEmbed(
+          "Cancelling Letters",
+          `Processed first **${cancelSteps.length}** live steps.\nRemaining cancellations were summarized to keep this smooth.`
+        )
+      ]
+    });
+    await wait(800);
+  }
+
+  await msg.edit({
+    embeds: [
+      makeEmbed(
+        "Remaining Letters",
+        `**${left}** → \`${process.remaining1 || "none"}\`\n**${right}** → \`${process.remaining2 || "none"}\`\n\nTotal remaining count = **${process.count}**`
+      )
+    ]
+  });
+
+  await wait(1000);
+
+  for (let i = 0; i < process.flamesSteps.length; i++) {
+    const step = process.flamesSteps[i]!;
+    await msg.edit({
+      embeds: [
+        makeEmbed(
+          `FLAMES Round ${i + 1}`,
+          `Count = **${process.count}**\n\n${formatFlamesStep(step.before, step.removed)}\n\nRemoved: **${step.removed}**\nRemaining: **${step.after.join(" ")}**`
+        )
+      ]
+    });
+    await wait(900);
+  }
+
+  const reactionMap: Record<string, string> = {
+    Friends: "bestie zone unlocked",
+    Love: "ok this one has lore",
+    Affection: "soft vibes only",
+    Marriage: "bro skipped to endgame",
+    Enemies: "nah this turned toxic",
+    Siblings: "most painful result possible"
+  };
+
+  const finalEmbed = makeEmbed(
+    "FLAMES Result",
+    `**${left} × ${right}**\n\nFinal Letter: **${process.finalLetter}**\nResult: **${process.finalResult}**\n\n_${reactionMap[process.finalResult] ?? "fate has spoken"}_`
+  );
+
+  const firstVisualUser =
+    mentions.length >= 2
+      ? (mentions[0] ?? null)
+      : mentions.length === 1
+        ? message.author
+        : null;
+  const secondVisualUser =
+    mentions.length >= 2
+      ? (mentions[1] ?? null)
+      : mentions.length === 1
+        ? (mentions[0] ?? null)
+        : null;
+
+  if (firstVisualUser && secondVisualUser) {
+    const generatorMap: Record<string, string[]> = {
+      Friends: ["samepicture", "friendship"],
+      Love: ["simpleship", "ship", "crush", "friendship"],
+      Affection: ["cuddle", "friendship"],
+      Marriage: ["ship", "simpleship", "friendship"],
+      Enemies: ["batslap", "whowouldwin", "friendship"],
+      Siblings: ["samepicture", "friendship"]
+    };
+
+    const candidates = generatorMap[process.finalResult] ?? ["friendship"];
+    for (const generator of candidates) {
+      try {
+        const result =
+          generator === "friendship"
+            ? await callWeebyGenerator("friendship", {
+                firstimage: getAvatarUrl(firstVisualUser),
+                secondimage: getAvatarUrl(secondVisualUser),
+                firsttext: firstVisualUser.displayName,
+                secondtext: secondVisualUser.displayName
+              })
+            : await callWeebyGenerator(generator, {
+                firstimage: getAvatarUrl(firstVisualUser),
+                secondimage: getAvatarUrl(secondVisualUser)
+              });
+        finalEmbed.setImage(`attachment://${generator}.png`);
+        await msg.edit({
+          embeds: [finalEmbed],
+          files: [weebyAttachment(generator, result, "png")]
+        });
+        return;
+      } catch {
+        // try next candidate
+      }
+    }
+  }
+
+  try {
+    const gifMap: Record<string, string> = {
+      Friends: "highfive",
+      Love: "kiss",
+      Affection: "cuddle",
+      Marriage: "wedding",
+      Enemies: "slap",
+      Siblings: "handhold"
+    };
+    const gif = await callWeebyGif(gifMap[process.finalResult] ?? "wink");
+    finalEmbed.setImage(gif);
+  } catch {
+    // keep no image on provider failure
+  }
+
+  await msg.edit({ embeds: [finalEmbed] });
 }
 
 async function runEightBall({ message, args }: PrefixContext) {
@@ -573,7 +811,7 @@ async function runRps({ message, args }: PrefixContext) {
 }
 
 async function runAvatar({ message, args }: PrefixContext) {
-  const mentions = [...message.mentions.users.values()];
+  const mentions = getMentionedUsersInOrder(message);
 
   if (mentions.length < 2 || mentions[0]?.id === mentions[1]?.id) {
     const user = mentions[0] ?? message.author;
@@ -610,7 +848,9 @@ async function runAvatar({ message, args }: PrefixContext) {
       new EmbedBuilder()
         .setColor(0xff006a)
         .setTitle("Shared Avatar")
-        .setDescription(`${user1} + ${user2}`)
+        .setDescription(
+          `${user1} + ${user2}\n**Ship Name:** \`${buildShipName(user1.displayName, user2.displayName)}\``
+        )
         .setAuthor({ name: message.author.tag, iconURL: message.author.displayAvatarURL() })
         .setImage("attachment://shared.png")
     ],
@@ -2421,6 +2661,9 @@ export async function handlePrefixCommand(message: Message) {
         return;
       case "shiprate":
         await runShipRate(ctx);
+        return;
+      case "flames":
+        await runFlames(ctx);
         return;
       case "eightball":
         await runEightBall(ctx);
